@@ -10,7 +10,7 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.chorockkim.Boo-app",
+      "bundleIdentifier": "com.chorockkim.booapp",
       "appleTeamId": "57T5382AXX",
       "softwareKeyboardLayoutMode": "pan",
       "infoPlist": {
