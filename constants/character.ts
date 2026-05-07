@@ -69,3 +69,20 @@ export const CHARACTER_IMAGES: CharacterImages = {
   },
   graduate: require("@/assets/characters/graduate.png"),
 };
+
+export const getNextCharacterState = (
+  state: CharacterState,
+): CharacterState => {
+  switch (state) {
+    case "basic1":
+      return "basic2";
+    case "basic2":
+      return "basic1";
+    case "happy1":
+      return "happy2";
+    case "happy2":
+      return "happy1";
+    default:
+      return state;
+  }
+};

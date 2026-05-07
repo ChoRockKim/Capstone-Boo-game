@@ -34,6 +34,7 @@ const BooNameInput = () => {
           placeholder="부 이름"
           returnKeyType="send"
           value={value}
+          maxLength={8}
           onChangeText={onChange}
           onSubmitEditing={() => handleSubmit(onSubmit)()}
           submitBehavior="submit"

@@ -1,11 +1,8 @@
 import React from "react";
 import { Controller, useFormContext } from "react-hook-form";
-import { Keyboard, TextInputProps } from "react-native";
 import InputField from "./InputField";
 
-interface InputTextProps extends TextInputProps {}
-
-const PasswordConfirmInput = ({ placeholder }: InputTextProps) => {
+const PasswordConfirmInput = () => {
   const { clearErrors, control, getValues, setFocus, trigger } =
     useFormContext();
 
