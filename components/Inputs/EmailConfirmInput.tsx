@@ -1,6 +1,6 @@
 import React, { useContext } from "react";
 import { Controller, useFormContext } from "react-hook-form";
-import { StepContext } from "../Register/RegisterContainer";
+import { StepContext } from "../Register/StepContext";
 import InputField from "./InputField";
 
 const EmailConfirmInput = () => {

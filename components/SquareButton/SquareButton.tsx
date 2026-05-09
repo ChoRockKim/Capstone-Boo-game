@@ -1,35 +1,34 @@
 import { colors } from "@/constants/colors";
-import { createAudioPlayer } from "expo-audio";
+import { playSoundEffect } from "@/utils/soundEffects";
 import React from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 import { SvgProps } from "react-native-svg";
 
 interface SquareButtonProps {
+  disabled?: boolean;
   Icon: React.FC<SvgProps>;
   onPress?: () => void;
   size?: "S" | "M";
 }
 
-const clickPlayer = createAudioPlayer(require("@/assets/musics/click.mp3"), {
-  keepAudioSessionActive: true,
-});
-clickPlayer.volume = 1;
-
-const playClickSound = () => {
-  void clickPlayer
-    .seekTo(0)
-    .then(() => clickPlayer.play())
-    .catch(() => clickPlayer.play());
-};
-
-const SquareButton = ({ Icon, onPress, size = "S" }: SquareButtonProps) => {
+const SquareButton = ({
+  disabled = false,
+  Icon,
+  onPress,
+  size = "S",
+}: SquareButtonProps) => {
   const handlePress = () => {
-    playClickSound();
+    if (disabled) {
+      return;
+    }
+
+    playSoundEffect("basicClick");
     onPress?.();
   };
 
   return (
     <Pressable
+      disabled={disabled}
       onPress={handlePress}
       style={({ pressed }) => [
         {
@@ -38,6 +37,7 @@ const SquareButton = ({ Icon, onPress, size = "S" }: SquareButtonProps) => {
           padding: size === "S" ? 8 : 18,
         },
         styles.button,
+        disabled && styles.disabledButton,
         pressed && styles.pressedButton,
       ]}
     >
@@ -46,7 +46,13 @@ const SquareButton = ({ Icon, onPress, size = "S" }: SquareButtonProps) => {
           <Icon
             width={size === "S" ? 32 : 40}
             height={size === "S" ? 32 : 40}
-            color={pressed ? colors.GOLD_NORMAL : colors.GREEN_NORMAL}
+            color={
+              disabled
+                ? colors.WHITE_NORMAL
+                : pressed
+                  ? colors.GOLD_NORMAL
+                  : colors.GREEN_NORMAL
+            }
           />
         </View>
       )}
@@ -65,6 +71,10 @@ const styles = StyleSheet.create({
   },
   pressedButton: {
     backgroundColor: colors.GOLD_LIGHT_ACTIVE,
+  },
+  disabledButton: {
+    backgroundColor: colors.GRAY_NORMAL_ACTIVE,
+    borderColor: colors.SILVER_NORMAL_ACTIVE,
   },
 
   iconContainer: {

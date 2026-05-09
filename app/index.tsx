@@ -1,10 +1,12 @@
+import { colors } from "@/constants/colors";
 import Login from "@/components/Login/Login";
 import MainButton from "@/components/MainButton/MainButton";
 import RegisterContainer from "@/components/Register/RegisterContainer";
-import { playBackgroundMusic } from "@/utils/backgroundMusic";
+import { startBackgroundMusicSession } from "@/utils/backgroundMusic";
 import { Image } from "expo-image";
+import { useFocusEffect } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { StyleSheet, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -12,9 +14,11 @@ export default function Index() {
   const [isRegisterOpen, setIsRegisterOpen] = useState(false);
   const [isLoginOpen, setIsLoginOpen] = useState(false);
 
-  useEffect(() => {
-    playBackgroundMusic();
-  }, []);
+  useFocusEffect(
+    useCallback(() => {
+      return startBackgroundMusicSession("titleLogin");
+    }, []),
+  );
 
   return (
     <View style={styles.backgroundImage}>
@@ -71,6 +75,7 @@ export default function Index() {
 const styles = StyleSheet.create({
   backgroundImage: {
     flex: 1,
+    backgroundColor: colors.GRAY_NORMAL,
   },
   buttonContainer: {
     position: "absolute",

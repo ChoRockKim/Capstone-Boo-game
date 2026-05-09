@@ -12,7 +12,6 @@ import {
   StyleSheet,
   Text,
   TouchableWithoutFeedback,
-  UIManager,
   useWindowDimensions,
   View,
 } from "react-native";
@@ -30,12 +29,6 @@ const KEYBOARD_SHOW_EVENT =
 const KEYBOARD_HIDE_EVENT =
   Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
 
-if (
-  Platform.OS === "android" &&
-  UIManager.setLayoutAnimationEnabledExperimental
-) {
-  UIManager.setLayoutAnimationEnabledExperimental(true);
-}
 type LoginValues = {
   email: string;
   password: string;

@@ -1,6 +1,6 @@
 import { colors } from "@/constants/colors";
 import { fonts } from "@/constants/fonts";
-import { createAudioPlayer } from "expo-audio";
+import { playSoundEffect } from "@/utils/soundEffects";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import Svg, { G, Path } from "react-native-svg";
 
@@ -62,18 +62,6 @@ const SIZES = {
   S: { width: 284, height: 60, fontSize: 20, lineHeight: 26 },
 };
 
-const clickPlayer = createAudioPlayer(require("@/assets/musics/click.mp3"), {
-  keepAudioSessionActive: true,
-});
-clickPlayer.volume = 1;
-
-const playClickSound = () => {
-  void clickPlayer
-    .seekTo(0)
-    .then(() => clickPlayer.play())
-    .catch(() => clickPlayer.play());
-};
-
 // draws a rectangle with 2-step pixel corners
 function pixelPath(w: number, h: number): string {
   return [
@@ -115,7 +103,7 @@ const MainButton = ({
   const { fontSize, lineHeight } = defaults;
 
   const handlePress = () => {
-    playClickSound();
+    playSoundEffect("basicClick");
     onPress?.();
   };
 

@@ -1,94 +1,376 @@
-import { createAudioPlayer } from "expo-audio";
+import { createAudioPlayer, type AudioPlayer } from "expo-audio";
 
 const BACKGROUND_MUSIC_SOURCES = {
-  main: require("@/assets/musics/main-background.mp3"),
+  main: require("@/assets/musics/bgm/main-ui.mp3"),
+  titleLogin: require("@/assets/musics/bgm/title-login.mp3"),
 } as const;
 
 export type BackgroundMusicTrack = keyof typeof BACKGROUND_MUSIC_SOURCES;
 
+const BACKGROUND_MUSIC_RETRY_DELAY_MS = 500;
+const DEFAULT_BACKGROUND_MUSIC_VOLUME = 0.2;
+
+let backgroundMusicRetryTimer: ReturnType<typeof setTimeout> | null = null;
 let currentBackgroundMusicTrack: BackgroundMusicTrack = "main";
+let backgroundMusicVolume = 1;
+let isBackgroundMusicRequested = false;
+let shouldResumeBackgroundMusicAfterPause = false;
+let activeBackgroundMusicSessionId: number | null = null;
+let nextBackgroundMusicSessionId = 0;
 
-const backgroundMusicPlayer = createAudioPlayer(
-  BACKGROUND_MUSIC_SOURCES[currentBackgroundMusicTrack],
-  {
-    keepAudioSessionActive: true,
-  },
-);
-
-backgroundMusicPlayer.volume = 0.2;
-backgroundMusicPlayer.loop = true;
+const backgroundMusicPlayers: Partial<
+  Record<BackgroundMusicTrack, AudioPlayer>
+> = {};
 
 const clampVolume = (volume: number) => Math.min(1, Math.max(0, volume));
 
-// 현재 배경음악이 재생 중이 아닐 때만 재생합니다.
-export const playBackgroundMusic = () => {
-  if (!backgroundMusicPlayer.playing) {
-    backgroundMusicPlayer.play();
-  }
+const getAllBackgroundMusicTracks = () => {
+  return Object.keys(BACKGROUND_MUSIC_SOURCES) as BackgroundMusicTrack[];
 };
 
-// 현재 재생 위치를 유지한 채 배경음악을 일시정지합니다.
-export const pauseBackgroundMusic = () => {
-  backgroundMusicPlayer.pause();
-};
-
-// 현재 재생 위치를 유지하면서 재생/일시정지를 전환합니다.
-export const toggleBackgroundMusic = () => {
-  if (backgroundMusicPlayer.playing) {
-    backgroundMusicPlayer.pause();
+const clearRetryTimer = () => {
+  if (!backgroundMusicRetryTimer) {
     return;
   }
 
-  backgroundMusicPlayer.play();
+  clearTimeout(backgroundMusicRetryTimer);
+  backgroundMusicRetryTimer = null;
 };
 
-// 현재 트랙을 처음으로 되감고 다시 재생합니다.
-export const restartBackgroundMusic = () => {
-  void backgroundMusicPlayer
-    .seekTo(0)
-    .then(() => backgroundMusicPlayer.play())
-    .catch(() => backgroundMusicPlayer.play());
+const getExistingBackgroundMusicPlayer = (
+  track: BackgroundMusicTrack = currentBackgroundMusicTrack,
+) => {
+  return backgroundMusicPlayers[track] ?? null;
 };
 
-// 현재 트랙을 일시정지하고 처음 위치로 되돌립니다.
-export const stopBackgroundMusic = () => {
-  void backgroundMusicPlayer
-    .seekTo(0)
-    .then(() => backgroundMusicPlayer.pause())
-    .catch(() => backgroundMusicPlayer.pause());
-};
+const pauseBackgroundMusicTrack = (track: BackgroundMusicTrack) => {
+  const player = getExistingBackgroundMusicPlayer(track);
+  if (!player || !player.playing) {
+    return;
+  }
 
-// 배경음악 트랙을 교체합니다. 기존에 재생 중이었다면 새 트랙도 바로 재생합니다.
-export const changeBackgroundMusic = (track: BackgroundMusicTrack) => {
-  if (currentBackgroundMusicTrack === track) return;
-
-  const shouldPlayAfterChange = backgroundMusicPlayer.playing;
-
-  currentBackgroundMusicTrack = track;
-  backgroundMusicPlayer.replace(BACKGROUND_MUSIC_SOURCES[track]);
-  backgroundMusicPlayer.loop = true;
-
-  if (shouldPlayAfterChange) {
-    backgroundMusicPlayer.play();
+  try {
+    player.pause();
+  } catch (error) {
+    console.warn(`Failed to pause the "${track}" background music.`, error);
   }
 };
 
-// 배경음악 볼륨을 변경합니다. 0보다 작거나 1보다 큰 값은 자동으로 보정됩니다.
+const pauseOtherBackgroundMusicTracks = (activeTrack: BackgroundMusicTrack) => {
+  getAllBackgroundMusicTracks().forEach((track) => {
+    if (track === activeTrack) {
+      return;
+    }
+
+    pauseBackgroundMusicTrack(track);
+  });
+};
+
+const releaseBackgroundMusicPlayer = (
+  track: BackgroundMusicTrack = currentBackgroundMusicTrack,
+) => {
+  const player = getExistingBackgroundMusicPlayer(track);
+  if (!player) {
+    return;
+  }
+
+  pauseBackgroundMusicTrack(track);
+
+  try {
+    player.remove();
+  } catch {
+    // 앱 초기화 시점과 겹치면 native player 정리가 실패할 수 있습니다.
+  } finally {
+    delete backgroundMusicPlayers[track];
+  }
+};
+
+const getBackgroundMusicPlayer = (
+  track: BackgroundMusicTrack = currentBackgroundMusicTrack,
+) => {
+  const existingPlayer = getExistingBackgroundMusicPlayer(track);
+  if (existingPlayer) {
+    return existingPlayer;
+  }
+
+  const player = createAudioPlayer(BACKGROUND_MUSIC_SOURCES[track], {
+    keepAudioSessionActive: true,
+  });
+
+  player.loop = true;
+  player.volume = DEFAULT_BACKGROUND_MUSIC_VOLUME * backgroundMusicVolume;
+  backgroundMusicPlayers[track] = player;
+
+  return player;
+};
+
+const withExistingBackgroundMusicPlayer = <T>(
+  callback: (player: AudioPlayer) => T,
+  track: BackgroundMusicTrack = currentBackgroundMusicTrack,
+): T | null => {
+  const player = getExistingBackgroundMusicPlayer(track);
+  if (!player) {
+    return null;
+  }
+
+  try {
+    return callback(player);
+  } catch (error) {
+    console.warn(
+      `Failed to access the "${track}" background music player.`,
+      error,
+    );
+    releaseBackgroundMusicPlayer(track);
+    return null;
+  }
+};
+
+const withBackgroundMusicPlayer = <T>(
+  callback: (player: AudioPlayer) => T,
+  track: BackgroundMusicTrack = currentBackgroundMusicTrack,
+): T | null => {
+  try {
+    const player = getBackgroundMusicPlayer(track);
+    return callback(player);
+  } catch (error) {
+    console.warn(
+      `The "${track}" background music player is not ready yet. The app will retry shortly.`,
+      error,
+    );
+    releaseBackgroundMusicPlayer(track);
+    return null;
+  }
+};
+
+const scheduleBackgroundMusicRetry = () => {
+  if (backgroundMusicRetryTimer || !isBackgroundMusicRequested) {
+    return;
+  }
+
+  backgroundMusicRetryTimer = setTimeout(() => {
+    backgroundMusicRetryTimer = null;
+    playBackgroundMusic();
+  }, BACKGROUND_MUSIC_RETRY_DELAY_MS);
+};
+
+export const preloadBackgroundMusicTracks = (
+  tracks: BackgroundMusicTrack[] = getAllBackgroundMusicTracks(),
+) => {
+  tracks.forEach((track) => {
+    withBackgroundMusicPlayer(() => true, track);
+  });
+};
+
+export const playBackgroundMusic = () => {
+  isBackgroundMusicRequested = true;
+
+  const didPlay = withBackgroundMusicPlayer((player) => {
+    pauseOtherBackgroundMusicTracks(currentBackgroundMusicTrack);
+
+    if (!player.playing) {
+      player.play();
+    }
+
+    return true;
+  });
+
+  if (didPlay) {
+    clearRetryTimer();
+    return;
+  }
+
+  scheduleBackgroundMusicRetry();
+};
+
+export const pauseBackgroundMusic = () => {
+  isBackgroundMusicRequested = false;
+  clearRetryTimer();
+  pauseBackgroundMusicTrack(currentBackgroundMusicTrack);
+};
+
+export const toggleBackgroundMusic = () => {
+  if (isBackgroundMusicRequested || isBackgroundMusicPlaying()) {
+    pauseBackgroundMusic();
+    return;
+  }
+
+  playBackgroundMusic();
+};
+
+export const restartBackgroundMusic = () => {
+  isBackgroundMusicRequested = true;
+
+  const player = withExistingBackgroundMusicPlayer(
+    (activePlayer) => activePlayer,
+  );
+  if (!player) {
+    playBackgroundMusic();
+    return;
+  }
+
+  pauseOtherBackgroundMusicTracks(currentBackgroundMusicTrack);
+
+  void player
+    .seekTo(0)
+    .then(() => {
+      try {
+        player.play();
+      } catch (error) {
+        console.warn("Failed to restart background music.", error);
+        releaseBackgroundMusicPlayer(currentBackgroundMusicTrack);
+        scheduleBackgroundMusicRetry();
+      }
+    })
+    .catch(() => {
+      try {
+        player.play();
+      } catch (error) {
+        console.warn("Failed to restart background music.", error);
+        releaseBackgroundMusicPlayer(currentBackgroundMusicTrack);
+        scheduleBackgroundMusicRetry();
+      }
+    });
+};
+
+const playBackgroundMusicFromStart = () => {
+  isBackgroundMusicRequested = true;
+
+  const player = withExistingBackgroundMusicPlayer(
+    (activePlayer) => activePlayer,
+  );
+
+  if (!player) {
+    playBackgroundMusic();
+    return;
+  }
+
+  pauseOtherBackgroundMusicTracks(currentBackgroundMusicTrack);
+
+  void player
+    .seekTo(0)
+    .then(() => {
+      try {
+        player.play();
+        clearRetryTimer();
+      } catch (error) {
+        console.warn(
+          "Failed to play background music from the beginning.",
+          error,
+        );
+        releaseBackgroundMusicPlayer(currentBackgroundMusicTrack);
+        scheduleBackgroundMusicRetry();
+      }
+    })
+    .catch(() => {
+      try {
+        player.play();
+        clearRetryTimer();
+      } catch (error) {
+        console.warn(
+          "Failed to play background music from the beginning.",
+          error,
+        );
+        releaseBackgroundMusicPlayer(currentBackgroundMusicTrack);
+        scheduleBackgroundMusicRetry();
+      }
+    });
+};
+
+export const stopBackgroundMusic = () => {
+  isBackgroundMusicRequested = false;
+  shouldResumeBackgroundMusicAfterPause = false;
+  clearRetryTimer();
+  pauseBackgroundMusicTrack(currentBackgroundMusicTrack);
+};
+
+export const changeBackgroundMusic = (track: BackgroundMusicTrack) => {
+  if (currentBackgroundMusicTrack === track) {
+    return;
+  }
+
+  const shouldResumePlayback =
+    isBackgroundMusicRequested ||
+    Boolean(
+      getExistingBackgroundMusicPlayer(currentBackgroundMusicTrack)?.playing,
+    );
+
+  pauseBackgroundMusicTrack(currentBackgroundMusicTrack);
+  currentBackgroundMusicTrack = track;
+
+  if (shouldResumePlayback) {
+    playBackgroundMusic();
+  }
+};
+
 export const setBackgroundMusicVolume = (volume: number) => {
-  backgroundMusicPlayer.volume = clampVolume(volume);
+  backgroundMusicVolume = clampVolume(volume);
+
+  getAllBackgroundMusicTracks().forEach((track) => {
+    withExistingBackgroundMusicPlayer((player) => {
+      player.volume = DEFAULT_BACKGROUND_MUSIC_VOLUME * backgroundMusicVolume;
+    }, track);
+  });
 };
 
-// 현재 배경음악 볼륨을 반환합니다.
 export const getBackgroundMusicVolume = () => {
-  return backgroundMusicPlayer.volume;
+  return backgroundMusicVolume;
 };
 
-// 현재 선택된 배경음악 트랙 키를 반환합니다.
 export const getBackgroundMusicTrack = () => {
   return currentBackgroundMusicTrack;
 };
 
-// 배경음악이 현재 재생 중인지 반환합니다.
 export const isBackgroundMusicPlaying = () => {
-  return backgroundMusicPlayer.playing;
+  const isPlaying = withExistingBackgroundMusicPlayer(
+    (player) => player.playing,
+  );
+  return isPlaying ?? false;
+};
+
+export const startBackgroundMusicSession = (track: BackgroundMusicTrack) => {
+  const sessionId = ++nextBackgroundMusicSessionId;
+  activeBackgroundMusicSessionId = sessionId;
+
+  clearRetryTimer();
+  changeBackgroundMusic(track);
+  playBackgroundMusicFromStart();
+
+  return () => {
+    if (activeBackgroundMusicSessionId !== sessionId) {
+      return;
+    }
+
+    activeBackgroundMusicSessionId = null;
+    stopBackgroundMusic();
+  };
+};
+
+export const pauseBackgroundMusicForOverlay = () => {
+  clearRetryTimer();
+  shouldResumeBackgroundMusicAfterPause =
+    isBackgroundMusicRequested || isBackgroundMusicPlaying();
+  pauseBackgroundMusicTrack(currentBackgroundMusicTrack);
+};
+
+export const resumeBackgroundMusicAfterOverlay = () => {
+  if (!shouldResumeBackgroundMusicAfterPause) {
+    return;
+  }
+
+  shouldResumeBackgroundMusicAfterPause = false;
+
+  const didResume = withExistingBackgroundMusicPlayer((player) => {
+    if (!player.playing) {
+      player.play();
+    }
+
+    return true;
+  });
+
+  if (didResume) {
+    clearRetryTimer();
+    return;
+  }
+
+  playBackgroundMusic();
 };

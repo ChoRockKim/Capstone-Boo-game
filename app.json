@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Boo-app",
+    "name": "부 키우기",
     "slug": "Boo-app",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -37,12 +37,26 @@
     "plugins": [
       "expo-router",
       [
+        "expo-navigation-bar",
+        {
+          "visibility": "hidden"
+        }
+      ],
+      [
         "expo-splash-screen",
         {
-          "image": "./assets/images/splash-icon.png",
-          "imageWidth": 200,
-          "resizeMode": "contain",
+          "enableFullScreenImage_legacy": true,
           "backgroundColor": "#ffffff",
+          "ios": {
+            "backgroundColor": "#ffffff",
+            "image": "./assets/images/main-building.png",
+            "resizeMode": "cover"
+          },
+          "android": {
+            "backgroundColor": "#E6F4FE",
+            "image": "./assets/images/icon.png",
+            "imageWidth": 220
+          },
           "dark": {
             "backgroundColor": "#000000"
           }

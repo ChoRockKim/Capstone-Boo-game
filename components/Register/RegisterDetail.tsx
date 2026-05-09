@@ -13,7 +13,6 @@ import {
   StyleSheet,
   Text,
   TouchableWithoutFeedback,
-  UIManager,
   useWindowDimensions,
   View,
 } from "react-native";
@@ -23,7 +22,7 @@ import PasswordConfirmInput from "../Inputs/PasswordConfirmInput";
 import PasswordInput from "../Inputs/PasswordInput";
 import StudentIdInput from "../Inputs/StudentIdInput";
 import MainButton from "../MainButton/MainButton";
-import { StepContext } from "./RegisterContainer";
+import { StepContext } from "./StepContext";
 
 interface RegisterProps {
   setIsRegisterOpen: (value: boolean) => void;
@@ -34,13 +33,6 @@ const KEYBOARD_SHOW_EVENT =
   Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
 const KEYBOARD_HIDE_EVENT =
   Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
-
-if (
-  Platform.OS === "android" &&
-  UIManager.setLayoutAnimationEnabledExperimental
-) {
-  UIManager.setLayoutAnimationEnabledExperimental(true);
-}
 
 const RegisterDetail = ({ setIsRegisterOpen }: RegisterProps) => {
   const { width } = useWindowDimensions();

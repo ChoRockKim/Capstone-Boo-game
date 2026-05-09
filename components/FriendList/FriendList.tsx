@@ -1,0 +1,256 @@
+import ArrowReturn from "@/assets/icons/arrow-back-return.svg";
+import CrossIcon from "@/assets/icons/cross.svg";
+import { colors } from "@/constants/colors";
+import { fonts } from "@/constants/fonts";
+import { useGameStore } from "@/stores/useGameStore";
+import { playSoundEffect } from "@/utils/soundEffects";
+import { Feather } from "@expo/vector-icons";
+import React, { useEffect, useMemo, useState } from "react";
+import { FlatList, Pressable, StyleSheet, Text, View } from "react-native";
+import FriendDeleteModal from "./FriendDeleteModal";
+import FriendListButton from "./FriendListButton";
+import { FriendListItem } from "./FriendListDummyData";
+
+interface FriendListProps {
+  setIsFriendListOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  setIsOptionOpen: React.Dispatch<React.SetStateAction<boolean>>;
+}
+
+const INITIAL_VISIBLE_COUNT = 5;
+const PAGE_SIZE = 5;
+
+type DeleteModalState =
+  | { friendId: string; friendName: string; mode: "confirm" | "success" }
+  | null;
+
+const FriendList = ({
+  setIsFriendListOpen,
+  setIsOptionOpen,
+}: FriendListProps) => {
+  const friendList = useGameStore((state) => state.friendList);
+  const removeFriend = useGameStore((state) => state.removeFriend);
+  const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_COUNT);
+  const [deleteModalState, setDeleteModalState] = useState<DeleteModalState>(
+    null,
+  );
+
+  const visibleFriends = useMemo(
+    () => friendList.slice(0, visibleCount),
+    [friendList, visibleCount],
+  );
+  const hasMoreFriends = visibleCount < friendList.length;
+
+  useEffect(() => {
+    if (friendList.length === 0) {
+      return;
+    }
+
+    setVisibleCount((prev) => Math.min(prev, friendList.length));
+  }, [friendList.length]);
+
+  const handleClosePress = () => {
+    playSoundEffect("basicClick");
+    setIsFriendListOpen(false);
+  };
+
+  const handleBackPress = () => {
+    playSoundEffect("basicClick");
+    setIsFriendListOpen(false);
+    setIsOptionOpen(true);
+  };
+
+  const handleLoadMorePress = () => {
+    playSoundEffect("basicClick");
+    setVisibleCount((prev) => Math.min(prev + PAGE_SIZE, friendList.length));
+  };
+
+  const handleDeletePress = (friend: FriendListItem) => {
+    setDeleteModalState({
+      friendId: friend.id,
+      friendName: friend.name,
+      mode: "confirm",
+    });
+  };
+
+  const handleDeleteModalClose = () => {
+    setDeleteModalState(null);
+  };
+
+  const handleConfirmDelete = () => {
+    if (!deleteModalState) {
+      return;
+    }
+
+    removeFriend(deleteModalState.friendId);
+    setDeleteModalState({
+      friendId: deleteModalState.friendId,
+      friendName: deleteModalState.friendName,
+      mode: "success",
+    });
+  };
+
+  const renderFriendItem = ({
+    index,
+    item,
+  }: {
+    index: number;
+    item: FriendListItem;
+  }) => (
+    <FriendListButton
+      friendName={item.name}
+      onDeletePress={() => handleDeletePress(item)}
+      order={index + 1}
+    />
+  );
+
+  return (
+    <View pointerEvents="box-none" style={styles.root}>
+      <View style={styles.container}>
+        <View style={styles.headerContainer}>
+          <Text style={styles.headerText}>친구 관리</Text>
+          <View style={styles.headerButtonGroup}>
+            <Pressable onPress={handleBackPress} style={styles.headerButton}>
+              <ArrowReturn width={24} height={24} color={colors.BLACK_NORMAL} />
+            </Pressable>
+            <Pressable onPress={handleClosePress} style={styles.headerButton}>
+              <CrossIcon width={24} height={24} fill={colors.BLACK_NORMAL} />
+            </Pressable>
+          </View>
+        </View>
+        <FlatList
+          data={visibleFriends}
+          keyExtractor={(item) => item.id}
+          renderItem={renderFriendItem}
+          ListEmptyComponent={
+            <Text style={styles.emptyText}>등록된 친구가 아직 없어요.</Text>
+          }
+          scrollEnabled={false}
+          style={styles.list}
+          contentContainerStyle={[
+            styles.listContent,
+            visibleFriends.length === 0 && styles.emptyListContent,
+          ]}
+        />
+        {hasMoreFriends ? (
+          <Pressable
+            onPress={handleLoadMorePress}
+            style={({ pressed }) => [
+              styles.moreButton,
+              pressed && styles.moreButtonPressed,
+            ]}
+          >
+            {({ pressed }) => (
+              <>
+                <Feather
+                  name="chevron-down"
+                  size={18}
+                  color={pressed ? colors.WHITE_NORMAL : colors.BLACK_NORMAL}
+                />
+                <Text
+                  style={[
+                    styles.moreButtonText,
+                    pressed && styles.moreButtonTextPressed,
+                  ]}
+                >
+                  더보기
+                </Text>
+              </>
+            )}
+          </Pressable>
+        ) : null}
+      </View>
+      {deleteModalState ? (
+        <FriendDeleteModal
+          friendName={deleteModalState.friendName}
+          mode={deleteModalState.mode}
+          onClose={handleDeleteModalClose}
+          onConfirmDelete={handleConfirmDelete}
+        />
+      ) : null}
+    </View>
+  );
+};
+
+const styles = StyleSheet.create({
+  root: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 999,
+    elevation: 999,
+    justifyContent: "flex-end",
+  },
+  container: {
+    paddingVertical: 24,
+    paddingHorizontal: 28,
+    position: "absolute",
+    zIndex: 999,
+    elevation: 999,
+    backgroundColor: colors.WHITE_NORMAL,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    borderTopColor: colors.BLACK_NORMAL,
+    borderTopWidth: 2,
+  },
+  headerContainer: {
+    marginBottom: 12,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  headerText: {
+    fontFamily: fonts.BASIC,
+    fontSize: 24,
+    flex: 1,
+  },
+  headerButton: {
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  headerButtonGroup: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 20,
+  },
+  listContent: {
+    gap: 10,
+  },
+  list: {
+    minHeight: 220,
+  },
+  emptyListContent: {
+    flexGrow: 1,
+    justifyContent: "center",
+  },
+  moreButton: {
+    marginTop: 16,
+    minHeight: 48,
+    borderWidth: 2,
+    borderRadius: 6,
+    borderColor: colors.BLACK_NORMAL,
+    backgroundColor: colors.WHITE_NORMAL,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+  },
+  moreButtonPressed: {
+    backgroundColor: colors.GOLD_LIGHT_ACTIVE,
+  },
+  moreButtonText: {
+    fontFamily: fonts.BASIC,
+    fontSize: 20,
+    color: colors.BLACK_NORMAL,
+    includeFontPadding: false,
+  },
+  moreButtonTextPressed: {
+    color: colors.WHITE_NORMAL,
+  },
+  emptyText: {
+    textAlign: "center",
+    fontFamily: fonts.BASIC,
+    fontSize: 18,
+    color: colors.SILVER_NORMAL_ACTIVE,
+    includeFontPadding: false,
+  },
+});
+
+export default FriendList;

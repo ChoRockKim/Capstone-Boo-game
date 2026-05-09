@@ -1,18 +1,20 @@
 import CoinIcon from "@/assets/icons/coin.svg";
 import { colors } from "@/constants/colors";
 import { fonts } from "@/constants/fonts";
-import React, { useState } from "react";
+import React from "react";
 import { StyleSheet, Text, View } from "react-native";
 
-interface CoinBoxProps {}
+interface CoinBoxProps {
+  coin: number;
+  dimmed?: boolean;
+}
 
-function CoinBox({}: CoinBoxProps) {
-  // 추후 커스텀훅으로 coin 가져오게 할 예정
-  const [coin, setCoin] = useState(1000);
+function CoinBox({ coin, dimmed = false }: CoinBoxProps) {
   return (
     <View style={styles.container}>
       <CoinIcon width={32} height={32} />
       <Text style={styles.coinText}>{coin}</Text>
+      {dimmed ? <View pointerEvents="none" style={styles.dimOverlay} /> : null}
     </View>
   );
 }
@@ -30,6 +32,11 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
+  },
+  dimOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0, 0, 0, 0.4)",
+    borderRadius: 4,
   },
   coinText: {
     fontFamily: fonts.BASIC,

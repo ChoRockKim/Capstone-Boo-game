@@ -1,10 +1,11 @@
 import { User } from "@/types";
-import React, { createContext, useState } from "react";
+import React, { useState } from "react";
 import { FormProvider, useForm } from "react-hook-form";
 import RegisterComplete from "./RegisterComplete";
 import RegisterDetail from "./RegisterDetail";
 import RegisterEmail from "./RegisterEmail";
 import RegisterEmailConfirm from "./RegisterEmailConfirm";
+import { StepContext } from "./StepContext";
 
 interface RegisterContainerProps {
   isRegisterOpen: boolean;
@@ -13,20 +14,8 @@ interface RegisterContainerProps {
   setIsLoginOpen: (value: boolean) => void;
 }
 
-type StepContextValue = {
-  step: number;
-  setStep: React.Dispatch<React.SetStateAction<number>>;
-};
-
-export const StepContext = createContext<StepContextValue>({
-  step: 0,
-  setStep: () => {},
-});
-
 const RegisterContainer = ({
   setIsRegisterOpen,
-  isRegisterOpen,
-  isLoginOpen,
   setIsLoginOpen,
 }: RegisterContainerProps) => {
   const [step, setStep] = useState(0);

@@ -10,7 +10,6 @@ import {
   StyleSheet,
   Text,
   TouchableWithoutFeedback,
-  UIManager,
   View,
 } from "react-native";
 import EmailInput from "../Inputs/EmailInput";
@@ -25,13 +24,6 @@ const KEYBOARD_SHOW_EVENT =
   Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
 const KEYBOARD_HIDE_EVENT =
   Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
-
-if (
-  Platform.OS === "android" &&
-  UIManager.setLayoutAnimationEnabledExperimental
-) {
-  UIManager.setLayoutAnimationEnabledExperimental(true);
-}
 
 const RegisterEmail = ({ setStep, setIsRegisterOpen }: RegisterProps) => {
   const [keyboardHeight, setKeyboardHeight] = useState(0);

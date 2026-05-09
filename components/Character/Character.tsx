@@ -11,12 +11,14 @@ import { StyleSheet, View } from "react-native";
 interface CharacterProps {
   animationIntervalMs?: number;
   grade: CharacterGrade;
+  onImageReady?: () => void;
   state: CharacterState;
 }
 
 const Character = ({
   animationIntervalMs = 800,
   grade,
+  onImageReady,
   state,
 }: CharacterProps) => {
   const [currentState, setCurrentState] = useState<CharacterState>(state);
@@ -43,6 +45,8 @@ const Character = ({
         source={characterImage}
         contentFit="contain"
         cachePolicy="memory-disk"
+        onDisplay={onImageReady}
+        onError={onImageReady}
       />
     </View>
   );

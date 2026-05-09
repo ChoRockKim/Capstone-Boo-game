@@ -11,11 +11,11 @@ export type CharacterState =
 
 export type CharacterLifeStage = CharacterGrade | "graduate";
 
-export type GradeCharacterImages = Record<CharacterState, string>;
+export type GradeCharacterImages = Record<CharacterState, number>;
 
 export type CharacterImages = {
   grades: Record<CharacterGrade, GradeCharacterImages>;
-  graduate: string;
+  graduate: number;
 };
 
 export const CHARACTER_STATE_LABELS: Record<CharacterState, string> = {
