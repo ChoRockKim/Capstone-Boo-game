@@ -7,6 +7,7 @@ import UserCircleIcon from "@/assets/icons/User-circle.svg";
 import { colors } from "@/constants/colors";
 import { fonts } from "@/constants/fonts";
 import { useGameStore } from "@/stores/useGameStore";
+import { router } from "expo-router";
 import React from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import OptionButton from "./OptionButton";
@@ -105,6 +106,7 @@ const Options = ({
           label="알림"
         />
         <OptionButton
+          onPress={() => router.replace("/")}
           icon={(pressed) => (
             <ArrowOutsideIcon
               width={20}
@@ -114,7 +116,7 @@ const Options = ({
               }
             />
           )}
-          label="탈퇴"
+          label="로그아웃"
         />
       </View>
       <View style={styles.developerSection}>

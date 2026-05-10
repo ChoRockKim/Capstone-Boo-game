@@ -2,6 +2,7 @@ import { createAudioPlayer, type AudioPlayer } from "expo-audio";
 
 const BACKGROUND_MUSIC_SOURCES = {
   main: require("@/assets/musics/bgm/main-ui.mp3"),
+  myRoom: require("@/assets/musics/bgm/my-room.mp3"),
   titleLogin: require("@/assets/musics/bgm/title-login.mp3"),
 } as const;
 
@@ -9,6 +10,11 @@ export type BackgroundMusicTrack = keyof typeof BACKGROUND_MUSIC_SOURCES;
 
 const BACKGROUND_MUSIC_RETRY_DELAY_MS = 500;
 const DEFAULT_BACKGROUND_MUSIC_VOLUME = 0.2;
+const BACKGROUND_MUSIC_VOLUME_SCALE: Record<BackgroundMusicTrack, number> = {
+  main: 1,
+  myRoom: 1.6,
+  titleLogin: 1,
+};
 
 let backgroundMusicRetryTimer: ReturnType<typeof setTimeout> | null = null;
 let currentBackgroundMusicTrack: BackgroundMusicTrack = "main";
@@ -23,6 +29,14 @@ const backgroundMusicPlayers: Partial<
 > = {};
 
 const clampVolume = (volume: number) => Math.min(1, Math.max(0, volume));
+
+const getBackgroundMusicPlayerVolume = (track: BackgroundMusicTrack) => {
+  return (
+    DEFAULT_BACKGROUND_MUSIC_VOLUME *
+    BACKGROUND_MUSIC_VOLUME_SCALE[track] *
+    backgroundMusicVolume
+  );
+};
 
 const getAllBackgroundMusicTracks = () => {
   return Object.keys(BACKGROUND_MUSIC_SOURCES) as BackgroundMusicTrack[];
@@ -98,7 +112,7 @@ const getBackgroundMusicPlayer = (
   });
 
   player.loop = true;
-  player.volume = DEFAULT_BACKGROUND_MUSIC_VOLUME * backgroundMusicVolume;
+  player.volume = getBackgroundMusicPlayerVolume(track);
   backgroundMusicPlayers[track] = player;
 
   return player;
@@ -307,7 +321,7 @@ export const setBackgroundMusicVolume = (volume: number) => {
 
   getAllBackgroundMusicTracks().forEach((track) => {
     withExistingBackgroundMusicPlayer((player) => {
-      player.volume = DEFAULT_BACKGROUND_MUSIC_VOLUME * backgroundMusicVolume;
+      player.volume = getBackgroundMusicPlayerVolume(track);
     }, track);
   });
 };

@@ -23,12 +23,12 @@ import LoadingOverlay from "@/components/LoadingOverlay/LoadingOverlay";
 import {
   formatMealCountdown,
   getMealAvailabilityStatus,
+  PLATE_IMAGE_ASSETS,
 } from "@/components/MealPanel/MealMenuData";
 import MealPanel from "@/components/MealPanel/MealPanel";
 import MyProfile from "@/components/MyProfile/MyProfile";
 import Options from "@/components/Options/Options";
 import ProgressBar from "@/components/ProgressBar/ProgressBar";
-import QuizPanel from "@/components/QuizPanel/QuizPanel";
 import {
   formatQuizCooldownRemaining,
   getAvailableQuizQuestions,
@@ -36,10 +36,14 @@ import {
   getQuizDailyCountForDate,
   QUIZ_DAILY_LIMIT,
 } from "@/components/QuizPanel/QuizData";
+import QuizPanel from "@/components/QuizPanel/QuizPanel";
+import { ROOM_IMAGE_ASSETS } from "@/components/Room/RoomData";
 import SoundSettings from "@/components/SoundSettings/SoundSettings";
 import SquareButton from "@/components/SquareButton/SquareButton";
 import TopAlert from "@/components/TopAlert/TopAlert";
-import type { CharacterState } from "@/constants/character";
+import { TUTORIAL_IMAGE_ASSETS } from "@/components/TutorialPanel/TutorialData";
+import TutorialPanel from "@/components/TutorialPanel/TutorialPanel";
+import { CHARACTER_IMAGES, type CharacterState } from "@/constants/character";
 import { colors } from "@/constants/colors";
 import { fonts } from "@/constants/fonts";
 import type { PendingEvolution } from "@/stores/useGameStore";
@@ -57,7 +61,7 @@ import {
 } from "@/utils/getTodayMeal";
 import { playSoundEffect } from "@/utils/soundEffects";
 import { getRequiredXpForGrade, getXpProgressInfo } from "@/utils/xpProgress";
-import { Image } from "expo-image";
+import { Image as ExpoImage, Image } from "expo-image";
 import { router, useFocusEffect } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -70,6 +74,7 @@ import {
 const CHARACTER_SIZE = 319;
 const BIG_BUTTON_HEIGHT = 76;
 const BOO_CHAT_DURATION_MS = 2000;
+const CUSTOM_LOADING_MIN_DURATION_MS = 2000;
 const PROGRESS_BAR_GAP = 22;
 const AUTO_BOO_CHAT_INTERVAL_MS = 6000;
 const MEAL_STATUS_SYNC_INTERVAL_MS = 30000;
@@ -85,6 +90,37 @@ const EVOLUTION_POST_SUCCESS_SETTLE_MS = Math.max(
   EVOLUTION_ALERT_SUCCESS_MS,
   EVOLUTION_CONGRAT_SOUND_DURATION_MS - EVOLUTION_CONGRAT_SOUND_EARLY_MS,
 );
+const GAME_IMAGE_ASSETS = [
+  require("../../assets/images/big-smoke.png"),
+  ...Object.values(CHARACTER_IMAGES.grades).flatMap((gradeImages) =>
+    Object.values(gradeImages),
+  ),
+  CHARACTER_IMAGES.graduate,
+  ...PLATE_IMAGE_ASSETS,
+  ...ROOM_IMAGE_ASSETS,
+  ...TUTORIAL_IMAGE_ASSETS,
+];
+
+let hasPreloadedGameImageAssets = false;
+let gameImageAssetsPreloadPromise: Promise<void> | null = null;
+
+const preloadGameImageAssets = () => {
+  if (hasPreloadedGameImageAssets) {
+    return Promise.resolve();
+  }
+
+  if (!gameImageAssetsPreloadPromise) {
+    gameImageAssetsPreloadPromise = Promise.all(
+      GAME_IMAGE_ASSETS.map((source) => ExpoImage.loadAsync(source)),
+    )
+      .catch(() => undefined)
+      .then(() => {
+        hasPreloadedGameImageAssets = true;
+      });
+  }
+
+  return gameImageAssetsPreloadPromise;
+};
 
 const resolvePostEvolutionCharacterState = (
   characterState: CharacterState,
@@ -131,6 +167,8 @@ export default function Index() {
   const isBooChatVisibleRef = useRef(false);
   const isAnyOverlayOpenRef = useRef(false);
   const isEvolutionBusyRef = useRef(false);
+  const hasCheckedTutorialPromptRef = useRef(false);
+  const shouldUseMinimumGameLoadingRef = useRef(!hasPreloadedGameImageAssets);
   const todayMealSectionsRef = useRef<TodayMealSection[]>([]);
   const [isOptionOpen, setIsOptionOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
@@ -139,11 +177,22 @@ export default function Index() {
   const [isSoundSettingsOpen, setIsSoundSettingsOpen] = useState(false);
   const [isMealOpen, setIsMealOpen] = useState(false);
   const [isQuizOpen, setIsQuizOpen] = useState(false);
+  const [isTutorialOpen, setIsTutorialOpen] = useState(false);
   const [isDeveloperPanelOpen, setIsDeveloperPanelOpen] = useState(false);
-  const [isBackgroundReady, setIsBackgroundReady] = useState(false);
+  const [isBackgroundReady, setIsBackgroundReady] = useState(
+    hasPreloadedGameImageAssets,
+  );
+  const [areGameAssetsLoaded, setAreGameAssetsLoaded] = useState(
+    hasPreloadedGameImageAssets,
+  );
+  const [isMinimumLoadingElapsed, setIsMinimumLoadingElapsed] = useState(
+    !shouldUseMinimumGameLoadingRef.current,
+  );
   const [booChatMessage, setBooChatMessage] = useState("");
   const [isBooChatVisible, setIsBooChatVisible] = useState(false);
-  const [isCharacterReady, setIsCharacterReady] = useState(false);
+  const [isCharacterReady, setIsCharacterReady] = useState(
+    hasPreloadedGameImageAssets,
+  );
   const [activeEvolution, setActiveEvolution] =
     useState<PendingEvolution | null>(null);
   const [evolutionPhase, setEvolutionPhase] = useState<
@@ -169,6 +218,9 @@ export default function Index() {
   const developerModeEnabled = useGameStore(
     (state) => state.developerModeEnabled,
   );
+  const hasSeenGameTutorial = useGameStore(
+    (state) => state.hasSeenGameTutorial,
+  );
   const lastFedMeals = useGameStore((state) => state.lastFedMeals);
   const mealRestrictionEnabled = useGameStore(
     (state) => state.mealRestrictionEnabled,
@@ -183,12 +235,17 @@ export default function Index() {
     (state) => state.quizDailyLimitEnabled,
   );
   const setCharacterState = useGameStore((state) => state.setCharacterState);
+  const setHasSeenGameTutorial = useGameStore(
+    (state) => state.setHasSeenGameTutorial,
+  );
   const syncMealStatus = useGameStore((state) => state.syncMealStatus);
   const totalXp = useGameStore((state) => state.totalXp);
   const bottomButtonOffset = Math.max(insets.bottom + 24, 46);
   const progressBarBottomOffset =
     bottomButtonOffset + BIG_BUTTON_HEIGHT + PROGRESS_BAR_GAP;
   const isGameVisualReady = isBackgroundReady && isCharacterReady;
+  const isGameLoadingVisible =
+    !isMinimumLoadingElapsed || !areGameAssetsLoaded || !isGameVisualReady;
   const xpProgress = useMemo(() => getXpProgressInfo(totalXp), [totalXp]);
   const evolutionDisplaySource =
     activeEvolution &&
@@ -242,8 +299,7 @@ export default function Index() {
     quizDailyLimitEnabled &&
     !isQuizDailyLimitReached &&
     availableQuizQuestions.length === 0;
-  const isQuizButtonDisabled =
-    isQuizDailyLimitReached || isQuizCooldownLocked;
+  const isQuizButtonDisabled = isQuizDailyLimitReached || isQuizCooldownLocked;
   const nextQuizUnlockAt = isQuizDailyLimitReached
     ? getNextQuizDailyResetAt(mealNow)
     : nextQuizAvailableAt;
@@ -257,6 +313,37 @@ export default function Index() {
       return startBackgroundMusicSession("main");
     }, []),
   );
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const preloadGameAssets = async () => {
+      await preloadGameImageAssets();
+
+      if (isMounted) {
+        setAreGameAssetsLoaded(true);
+      }
+    };
+
+    void preloadGameAssets();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!shouldUseMinimumGameLoadingRef.current) {
+      setIsMinimumLoadingElapsed(true);
+      return;
+    }
+
+    const loadingTimer = setTimeout(() => {
+      setIsMinimumLoadingElapsed(true);
+    }, CUSTOM_LOADING_MIN_DURATION_MS);
+
+    return () => clearTimeout(loadingTimer);
+  }, []);
 
   useEffect(() => {
     const mealClockTimer = setInterval(() => {
@@ -307,7 +394,9 @@ export default function Index() {
 
   useEffect(() => {
     isAnyOverlayOpenRef.current =
+      isGameLoadingVisible ||
       isEvolutionBusy ||
+      isTutorialOpen ||
       isDeveloperPanelOpen ||
       isOptionOpen ||
       isProfileOpen ||
@@ -319,6 +408,8 @@ export default function Index() {
   }, [
     isDeveloperPanelOpen,
     isEvolutionBusy,
+    isGameLoadingVisible,
+    isTutorialOpen,
     isFriendListOpen,
     isFriendOpen,
     isMealOpen,
@@ -331,6 +422,45 @@ export default function Index() {
   useEffect(() => {
     todayMealSectionsRef.current = todayMealSections;
   }, [todayMealSections]);
+
+  useEffect(() => {
+    if (hasSeenGameTutorial) {
+      hasCheckedTutorialPromptRef.current = false;
+      setIsTutorialOpen(false);
+      return;
+    }
+
+    if (
+      hasCheckedTutorialPromptRef.current ||
+      isGameLoadingVisible ||
+      isEvolutionBusy ||
+      isDeveloperPanelOpen ||
+      isOptionOpen ||
+      isProfileOpen ||
+      isFriendOpen ||
+      isFriendListOpen ||
+      isSoundSettingsOpen ||
+      isMealOpen ||
+      isQuizOpen
+    ) {
+      return;
+    }
+
+    hasCheckedTutorialPromptRef.current = true;
+    setIsTutorialOpen(true);
+  }, [
+    hasSeenGameTutorial,
+    isDeveloperPanelOpen,
+    isEvolutionBusy,
+    isFriendListOpen,
+    isFriendOpen,
+    isGameLoadingVisible,
+    isMealOpen,
+    isOptionOpen,
+    isProfileOpen,
+    isQuizOpen,
+    isSoundSettingsOpen,
+  ]);
 
   const clearEvolutionStartTimer = useCallback(() => {
     if (evolutionStartTimerRef.current) {
@@ -665,6 +795,8 @@ export default function Index() {
     const autoChatTimer = setInterval(() => {
       if (
         isEvolutionBusy ||
+        isGameLoadingVisible ||
+        isTutorialOpen ||
         isBooChatVisible ||
         isDeveloperPanelOpen ||
         isOptionOpen ||
@@ -689,6 +821,8 @@ export default function Index() {
     characterState,
     getContextualBooChatMessage,
     isEvolutionBusy,
+    isGameLoadingVisible,
+    isTutorialOpen,
     isDeveloperPanelOpen,
     isBooChatVisible,
     isFriendListOpen,
@@ -873,7 +1007,7 @@ export default function Index() {
             <SquareButton
               disabled={isEvolutionSequenceActive}
               Icon={home}
-              onPress={() => router.replace("/")}
+              onPress={() => router.replace("/room")}
             />
             <CoinBox coin={coin} dimmed={isEvolutionSequenceActive} />
           </View>
@@ -1007,6 +1141,12 @@ export default function Index() {
             <SquareButton
               disabled={isEvolutionSequenceActive}
               Icon={ball}
+              onPress={() => {
+                showTopAlert("준비 중", "아직 개발되지 않은 기능이에요.", {
+                  autoHideDuration: 1800,
+                  textSize: "compact",
+                });
+              }}
               size="M"
             />
           </View>
@@ -1075,7 +1215,15 @@ export default function Index() {
           setIsDeveloperPanelOpen={setIsDeveloperPanelOpen}
         />
       )}
-      {!isGameVisualReady && <LoadingOverlay />}
+      {isTutorialOpen && (
+        <TutorialPanel
+          onComplete={() => {
+            setHasSeenGameTutorial(true);
+            setIsTutorialOpen(false);
+          }}
+        />
+      )}
+      {isGameLoadingVisible && <LoadingOverlay />}
     </View>
   );
 }

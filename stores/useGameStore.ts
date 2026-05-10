@@ -20,6 +20,13 @@ import {
   QUIZ_WRONG_XP_PENALTY,
   QuizAttemptHistory,
 } from "@/components/QuizPanel/QuizData";
+import {
+  DEFAULT_EQUIPPED_ROOM_ITEMS,
+  EquippedRoomItems,
+  ROOM_ITEM_ASSETS,
+  RoomItemId,
+  RoomSlotId,
+} from "@/components/Room/RoomData";
 import { CharacterGrade, CharacterState } from "@/constants/character";
 import { getTotalXpForGrade, getXpProgressInfo } from "@/utils/xpProgress";
 import { create } from "zustand";
@@ -71,7 +78,9 @@ type GameStoreState = {
   characterState: CharacterState;
   coin: number;
   developerModeEnabled: boolean;
+  equippedRoomItems: EquippedRoomItems;
   friendList: FriendListItem[];
+  hasSeenGameTutorial: boolean;
   lastFedMeals: MealHistory;
   lastFedMealSlotIndex: number;
   masterVolume: number;
@@ -105,8 +114,10 @@ type GameStoreActions = {
   setCharacterState: (characterState: CharacterState) => void;
   setCoin: (coin: number) => void;
   setDeveloperModeEnabled: (enabled: boolean) => void;
+  setEquippedRoomItem: (slotId: RoomSlotId, itemId: RoomItemId) => void;
   setFriendList: (friendList: FriendListItem[]) => void;
   setGameState: (patch: Partial<GameStoreState>) => void;
+  setHasSeenGameTutorial: (hasSeenGameTutorial: boolean) => void;
   setMasterVolume: (volume: number) => void;
   setGrade: (grade: CharacterGrade) => void;
   setBgmVolume: (volume: number) => void;
@@ -143,10 +154,12 @@ const clampVolume = (volume: number) => Math.max(0, Math.min(volume, 1));
 const createInitialGameState = (): GameStoreState => ({
   appliedSkippedMealPenaltyCount: 0,
   userName: "김외대",
-  booName: "부는집이가고싶다",
+  booName: "부",
   coin: 100,
   developerModeEnabled: false,
+  equippedRoomItems: { ...DEFAULT_EQUIPPED_ROOM_ITEMS },
   friendList: [...FRIEND_LIST_DUMMY_DATA],
+  hasSeenGameTutorial: false,
   characterState: DEFAULT_CHARACTER_STATE,
   lastFedMeals: {},
   lastFedMealSlotIndex: getLatestCompletedMealSlotIndex(),
@@ -280,10 +293,8 @@ export const useGameStore = create<GameStore>()(
           const latestCompletedMealSlotIndex =
             getLatestCompletedMealSlotIndex();
           const nextLastFedMealSlotIndex =
-            Math.min(
-              state.lastFedMealSlotIndex,
-              latestCompletedMealSlotIndex,
-            ) - 1;
+            Math.min(state.lastFedMealSlotIndex, latestCompletedMealSlotIndex) -
+            1;
           const skippedMealCount = Math.max(
             latestCompletedMealSlotIndex - nextLastFedMealSlotIndex,
             0,
@@ -293,8 +304,7 @@ export const useGameStore = create<GameStore>()(
             0,
           );
           const nextPenaltyCount = Math.max(
-            totalSkippedMealPenaltyCount -
-              state.appliedSkippedMealPenaltyCount,
+            totalSkippedMealPenaltyCount - state.appliedSkippedMealPenaltyCount,
             0,
           );
           const nextTotalXp =
@@ -383,15 +393,12 @@ export const useGameStore = create<GameStore>()(
         );
         const xpPenalty = nextPenaltyCount * MEAL_SKIP_XP_PENALTY;
         const nextTotalXp =
-          nextPenaltyCount > 0
-            ? Math.max(totalXp - xpPenalty, 0)
-            : totalXp;
+          nextPenaltyCount > 0 ? Math.max(totalXp - xpPenalty, 0) : totalXp;
         const shouldStayEating =
           preserveEatingState && characterState === "eating";
         const shouldBeHungry = skippedMealCount >= HUNGRY_MEAL_SKIP_THRESHOLD;
-        const normalizedCharacterState = normalizeEvolutionResumeState(
-          characterState,
-        );
+        const normalizedCharacterState =
+          normalizeEvolutionResumeState(characterState);
         const nextCharacterState = shouldStayEating
           ? "eating"
           : shouldBeHungry
@@ -414,12 +421,7 @@ export const useGameStore = create<GameStore>()(
         };
       },
       feedBoo: (mealCost, mealSectionId) => {
-        const {
-          coin,
-          lastFedMeals,
-          mealRestrictionEnabled,
-          totalXp,
-        } = get();
+        const { coin, lastFedMeals, mealRestrictionEnabled, totalXp } = get();
         const todayKey = getLocalDateKey();
         const lastFedMealSlotIndex = mealSectionId
           ? getMealSlotIndex(new Date(), mealSectionId)
@@ -504,8 +506,7 @@ export const useGameStore = create<GameStore>()(
               getQuizCooldownEndAt(
                 quizAttemptHistory,
                 attemptedAt,
-              )?.toISOString() ??
-              null,
+              )?.toISOString() ?? null,
           };
         }
 
@@ -540,7 +541,22 @@ export const useGameStore = create<GameStore>()(
       setCoin: (coin) => set({ coin: Math.max(coin, 0) }),
       setDeveloperModeEnabled: (developerModeEnabled) =>
         set({ developerModeEnabled }),
+      setEquippedRoomItem: (slotId, itemId) =>
+        set((state) => {
+          if (ROOM_ITEM_ASSETS[itemId]?.slotId !== slotId) {
+            return state;
+          }
+
+          return {
+            equippedRoomItems: {
+              ...state.equippedRoomItems,
+              [slotId]: itemId,
+            },
+          };
+        }),
       setFriendList: (friendList) => set({ friendList }),
+      setHasSeenGameTutorial: (hasSeenGameTutorial) =>
+        set({ hasSeenGameTutorial }),
       setMasterVolume: (masterVolume) =>
         set({ masterVolume: clampVolume(masterVolume) }),
       setGrade: (grade) => set({ totalXp: getTotalXpForGrade(grade) }),
@@ -611,7 +627,9 @@ export const useGameStore = create<GameStore>()(
         characterState: state.characterState,
         coin: state.coin,
         developerModeEnabled: state.developerModeEnabled,
+        equippedRoomItems: state.equippedRoomItems,
         friendList: state.friendList,
+        hasSeenGameTutorial: state.hasSeenGameTutorial,
         lastFedMeals: state.lastFedMeals,
         lastFedMealSlotIndex: state.lastFedMealSlotIndex,
         masterVolume: state.masterVolume,

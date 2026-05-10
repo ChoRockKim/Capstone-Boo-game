@@ -160,6 +160,9 @@ const DeveloperPanel = ({
   const setBooName = useGameStore((state) => state.setBooName);
   const setCharacterState = useGameStore((state) => state.setCharacterState);
   const setGrade = useGameStore((state) => state.setGrade);
+  const setHasSeenGameTutorial = useGameStore(
+    (state) => state.setHasSeenGameTutorial,
+  );
   const setMealDayMode = useGameStore((state) => state.setMealDayMode);
   const setStudentId = useGameStore((state) => state.setStudentId);
   const setTotalXp = useGameStore((state) => state.setTotalXp);
@@ -569,6 +572,22 @@ const DeveloperPanel = ({
                 onPress={() => {
                   clearQuizHistory();
                   showFeedback("퀴즈 기록을 초기화했어요");
+                }}
+              />
+            </View>
+          </View>
+
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>튜토리얼</Text>
+            <Text style={styles.sectionDescription}>
+              다음 메인 게임 화면 진입 때 튜토리얼 안내를 다시 띄웁니다.
+            </Text>
+            <View style={styles.chipRow}>
+              <DeveloperChipButton
+                label="튜토리얼 조회 초기화"
+                onPress={() => {
+                  setHasSeenGameTutorial(false);
+                  showFeedback("튜토리얼 조회 기록을 초기화했어요");
                 }}
               />
             </View>

@@ -12,7 +12,9 @@ import {
 import Svg, { G, Path } from "react-native-svg";
 
 interface BooChatProps {
+  maxTextWidth?: number;
   message: string;
+  scale?: number;
   style?: StyleProp<ViewStyle>;
   visible?: boolean;
 }
@@ -29,52 +31,68 @@ const TAIL_MID_WIDTH = 12;
 const TAIL_TIP_WIDTH = 4;
 const TAIL_STEP_HEIGHT = 4;
 
-function pixelBubblePath(width: number, height: number): string {
+function pixelBubblePath(
+  width: number,
+  height: number,
+  scale: number,
+): string {
+  const cornerInset = CORNER_INSET * scale;
+  const cornerOutset = CORNER_OUTSET * scale;
+  const tailBaseWidth = TAIL_BASE_WIDTH * scale;
+  const tailMidWidth = TAIL_MID_WIDTH * scale;
+  const tailTipWidth = TAIL_TIP_WIDTH * scale;
+  const tailStepHeight = TAIL_STEP_HEIGHT * scale;
   const centerX = width / 2;
-  const tailBaseHalf = TAIL_BASE_WIDTH / 2;
-  const tailMidHalf = TAIL_MID_WIDTH / 2;
-  const tailTipHalf = TAIL_TIP_WIDTH / 2;
-  const tailMidY = height + TAIL_STEP_HEIGHT;
-  const tailBottomY = height + TAIL_STEP_HEIGHT * 2;
+  const tailBaseHalf = tailBaseWidth / 2;
+  const tailMidHalf = tailMidWidth / 2;
+  const tailTipHalf = tailTipWidth / 2;
+  const tailMidY = height + tailStepHeight;
+  const tailBottomY = height + tailStepHeight * 2;
 
   return [
-    `M ${CORNER_OUTSET} 0`,
-    `L ${width - CORNER_OUTSET} 0`,
-    `L ${width - CORNER_OUTSET} ${CORNER_INSET}`,
-    `L ${width - CORNER_INSET} ${CORNER_INSET}`,
-    `L ${width - CORNER_INSET} ${CORNER_OUTSET}`,
-    `L ${width} ${CORNER_OUTSET}`,
-    `L ${width} ${height - CORNER_OUTSET}`,
-    `L ${width - CORNER_INSET} ${height - CORNER_OUTSET}`,
-    `L ${width - CORNER_INSET} ${height - CORNER_INSET}`,
-    `L ${width - CORNER_OUTSET} ${height - CORNER_INSET}`,
-    `L ${width - CORNER_OUTSET} ${height}`,
+    `M ${cornerOutset} 0`,
+    `L ${width - cornerOutset} 0`,
+    `L ${width - cornerOutset} ${cornerInset}`,
+    `L ${width - cornerInset} ${cornerInset}`,
+    `L ${width - cornerInset} ${cornerOutset}`,
+    `L ${width} ${cornerOutset}`,
+    `L ${width} ${height - cornerOutset}`,
+    `L ${width - cornerInset} ${height - cornerOutset}`,
+    `L ${width - cornerInset} ${height - cornerInset}`,
+    `L ${width - cornerOutset} ${height - cornerInset}`,
+    `L ${width - cornerOutset} ${height}`,
     `L ${centerX + tailBaseHalf} ${height}`,
     `L ${centerX + tailBaseHalf} ${tailMidY}`,
     `L ${centerX + tailMidHalf} ${tailMidY}`,
     `L ${centerX + tailMidHalf} ${tailBottomY}`,
     `L ${centerX + tailTipHalf} ${tailBottomY}`,
-    `L ${centerX + tailTipHalf} ${tailBottomY + TAIL_STEP_HEIGHT}`,
-    `L ${centerX - tailTipHalf} ${tailBottomY + TAIL_STEP_HEIGHT}`,
+    `L ${centerX + tailTipHalf} ${tailBottomY + tailStepHeight}`,
+    `L ${centerX - tailTipHalf} ${tailBottomY + tailStepHeight}`,
     `L ${centerX - tailTipHalf} ${tailBottomY}`,
     `L ${centerX - tailMidHalf} ${tailBottomY}`,
     `L ${centerX - tailMidHalf} ${tailMidY}`,
     `L ${centerX - tailBaseHalf} ${tailMidY}`,
     `L ${centerX - tailBaseHalf} ${height}`,
-    `L ${CORNER_OUTSET} ${height}`,
-    `L ${CORNER_OUTSET} ${height - CORNER_INSET}`,
-    `L ${CORNER_INSET} ${height - CORNER_INSET}`,
-    `L ${CORNER_INSET} ${height - CORNER_OUTSET}`,
-    `L 0 ${height - CORNER_OUTSET}`,
-    `L 0 ${CORNER_OUTSET}`,
-    `L ${CORNER_INSET} ${CORNER_OUTSET}`,
-    `L ${CORNER_INSET} ${CORNER_INSET}`,
-    `L ${CORNER_OUTSET} ${CORNER_INSET}`,
+    `L ${cornerOutset} ${height}`,
+    `L ${cornerOutset} ${height - cornerInset}`,
+    `L ${cornerInset} ${height - cornerInset}`,
+    `L ${cornerInset} ${height - cornerOutset}`,
+    `L 0 ${height - cornerOutset}`,
+    `L 0 ${cornerOutset}`,
+    `L ${cornerInset} ${cornerOutset}`,
+    `L ${cornerInset} ${cornerInset}`,
+    `L ${cornerOutset} ${cornerInset}`,
     "Z",
   ].join(" ");
 }
 
-const BooChat = ({ message, style, visible = true }: BooChatProps) => {
+const BooChat = ({
+  maxTextWidth: maxTextWidthProp = MAX_TEXT_WIDTH,
+  message,
+  scale = 1,
+  style,
+  visible = true,
+}: BooChatProps) => {
   const [textSizeCache, setTextSizeCache] = useState<
     Record<string, { height: number; width: number }>
   >({});
@@ -83,7 +101,23 @@ const BooChat = ({ message, style, visible = true }: BooChatProps) => {
     return null;
   }
 
-  const textSize = textSizeCache[message];
+  const textSizeKey = `${scale}:${maxTextWidthProp}:${message}`;
+  const textSize = textSizeCache[textSizeKey];
+  const strokeWidth = STROKE_WIDTH * scale;
+  const horizontalPadding = HORIZONTAL_PADDING * scale;
+  const maxTextWidth = maxTextWidthProp * scale;
+  const minBubbleWidth = MIN_BUBBLE_WIDTH * scale;
+  const minBubbleHeight = MIN_BUBBLE_HEIGHT * scale;
+  const tailStepHeight = TAIL_STEP_HEIGHT * scale;
+  const textExtraHeight = 18 * scale;
+  const textStyle = [
+    styles.message,
+    {
+      fontSize: 16 * scale,
+      lineHeight: 20 * scale,
+      maxWidth: maxTextWidth,
+    },
+  ];
 
   const handleMeasure = (event: LayoutChangeEvent) => {
     const { height, width } = event.nativeEvent.layout;
@@ -93,7 +127,7 @@ const BooChat = ({ message, style, visible = true }: BooChatProps) => {
     }
 
     setTextSizeCache((prev) => {
-      const currentSize = prev[message];
+      const currentSize = prev[textSizeKey];
 
       if (
         currentSize &&
@@ -105,7 +139,7 @@ const BooChat = ({ message, style, visible = true }: BooChatProps) => {
 
       return {
         ...prev,
-        [message]: { height, width },
+        [textSizeKey]: { height, width },
       };
     });
   };
@@ -113,7 +147,7 @@ const BooChat = ({ message, style, visible = true }: BooChatProps) => {
   if (!textSize) {
     return (
       <View pointerEvents="none" style={[styles.measureOnly, style]}>
-        <Text onLayout={handleMeasure} style={styles.measureText}>
+        <Text onLayout={handleMeasure} style={textStyle}>
           {message}
         </Text>
       </View>
@@ -121,35 +155,56 @@ const BooChat = ({ message, style, visible = true }: BooChatProps) => {
   }
 
   const bubbleWidth = Math.max(
-    MIN_BUBBLE_WIDTH,
+    minBubbleWidth,
     Math.min(
-      MAX_TEXT_WIDTH + HORIZONTAL_PADDING * 2,
-      textSize.width + HORIZONTAL_PADDING * 2,
+      maxTextWidth + horizontalPadding * 2,
+      textSize.width + horizontalPadding * 2,
     ),
   );
-  const bubbleHeight = Math.max(MIN_BUBBLE_HEIGHT, textSize.height + 18);
-  const totalHeight = bubbleHeight + TAIL_STEP_HEIGHT * 3 + STROKE_WIDTH;
-  const svgOffset = STROKE_WIDTH / 2;
-  const shapeWidth = bubbleWidth - STROKE_WIDTH;
-  const shapeHeight = bubbleHeight - STROKE_WIDTH;
+  const bubbleHeight = Math.max(
+    minBubbleHeight,
+    textSize.height + textExtraHeight,
+  );
+  const totalHeight = bubbleHeight + tailStepHeight * 3 + strokeWidth;
+  const svgOffset = strokeWidth / 2;
+  const shapeWidth = bubbleWidth - strokeWidth;
+  const shapeHeight = bubbleHeight - strokeWidth;
 
   return (
     <View
-      style={[styles.wrapper, style, { height: totalHeight, width: bubbleWidth }]}
+      style={[
+        styles.wrapper,
+        style,
+        { height: totalHeight, width: bubbleWidth },
+      ]}
     >
-      <Svg width={bubbleWidth} height={totalHeight} style={StyleSheet.absoluteFill}>
+      <Svg
+        width={bubbleWidth}
+        height={totalHeight}
+        style={StyleSheet.absoluteFill}
+      >
         <G transform={`translate(${svgOffset}, ${svgOffset})`}>
           <Path
-            d={pixelBubblePath(shapeWidth, shapeHeight)}
+            d={pixelBubblePath(shapeWidth, shapeHeight, scale)}
             fill={colors.WHITE_NORMAL}
             stroke={colors.BLACK_NORMAL}
-            strokeWidth={STROKE_WIDTH}
+            strokeWidth={strokeWidth}
           />
         </G>
       </Svg>
 
-      <View pointerEvents="none" style={[styles.textContainer, { height: bubbleHeight, width: bubbleWidth }]}>
-        <Text style={styles.message}>{message}</Text>
+      <View
+        pointerEvents="none"
+        style={[
+          styles.textContainer,
+          {
+            height: bubbleHeight,
+            paddingHorizontal: horizontalPadding,
+            width: bubbleWidth,
+          },
+        ]}
+      >
+        <Text style={textStyle}>{message}</Text>
       </View>
     </View>
   );
@@ -168,25 +223,12 @@ const styles = StyleSheet.create({
   textContainer: {
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: HORIZONTAL_PADDING,
   },
   message: {
     fontFamily: fonts.BASIC,
-    fontSize: 16,
-    lineHeight: 20,
     color: colors.BLACK_NORMAL,
     textAlign: "center",
     includeFontPadding: false,
-    maxWidth: MAX_TEXT_WIDTH,
-  },
-  measureText: {
-    fontFamily: fonts.BASIC,
-    fontSize: 16,
-    lineHeight: 20,
-    color: colors.BLACK_NORMAL,
-    textAlign: "center",
-    includeFontPadding: false,
-    maxWidth: MAX_TEXT_WIDTH,
   },
 });
 

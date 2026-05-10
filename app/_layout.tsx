@@ -1,5 +1,3 @@
-import { PLATE_IMAGE_ASSETS } from "@/components/MealPanel/MealMenuData";
-import { CHARACTER_IMAGES } from "@/constants/character";
 import { useGameStore } from "@/stores/useGameStore";
 import {
   preloadBackgroundMusicTracks,
@@ -21,16 +19,12 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 
 SplashScreen.preventAutoHideAsync();
 
-const APP_IMAGE_ASSETS = [
+const REQUIRED_IMAGE_ASSETS = [
   require("../assets/images/main-building.png"),
   require("../assets/images/main-title.png"),
   require("../assets/images/inGameMain.png"),
-  require("../assets/images/big-smoke.png"),
-  ...Object.values(CHARACTER_IMAGES.grades).flatMap((gradeImages) =>
-    Object.values(gradeImages),
-  ),
-  CHARACTER_IMAGES.graduate,
-  ...PLATE_IMAGE_ASSETS,
+  require("../assets/images/egg-closed.png"),
+  require("../assets/images/egg-opened.png"),
 ];
 
 type ExpoNavigationBarModule = {
@@ -64,7 +58,7 @@ export default function RootLayout() {
     const preloadAssets = async () => {
       try {
         await Promise.all(
-          APP_IMAGE_ASSETS.map((source) => ExpoImage.loadAsync(source)),
+          REQUIRED_IMAGE_ASSETS.map((source) => ExpoImage.loadAsync(source)),
         );
       } finally {
         if (isMounted) {
@@ -133,6 +127,7 @@ export default function RootLayout() {
         <Stack screenOptions={{ headerShown: false }}>
           <Stack.Screen name="index" />
           <Stack.Screen name="game/index" />
+          <Stack.Screen name="room/index" />
         </Stack>
       </SafeAreaProvider>
     </QueryClientProvider>

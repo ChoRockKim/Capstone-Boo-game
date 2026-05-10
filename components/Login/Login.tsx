@@ -56,6 +56,7 @@ const Login = ({ setIsLoginOpen }: RegisterProps) => {
   };
   const onError = () => {
     console.log("로그인 정보를 확인해주세요.");
+    router.replace("/game");
   };
 
   useEffect(() => {
