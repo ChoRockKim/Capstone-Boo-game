@@ -2,11 +2,11 @@ import AlarmIcon from "@/assets/icons/alarm.svg";
 import ArrowOutsideIcon from "@/assets/icons/arrow-outside.svg";
 import CrossIcon from "@/assets/icons/cross.svg";
 import CustomizationIcon from "@/assets/icons/Customization.svg";
+import Speaker from "@/assets/icons/speaker.svg";
 import UserCircleIcon from "@/assets/icons/User-circle.svg";
 import { colors } from "@/constants/colors";
 import { fonts } from "@/constants/fonts";
 import { useGameStore } from "@/stores/useGameStore";
-import { Feather } from "@expo/vector-icons";
 import React from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import OptionButton from "./OptionButton";
@@ -82,9 +82,9 @@ const Options = ({
             setIsSoundSettingsOpen(true);
           }}
           icon={(pressed) => (
-            <Feather
-              name="volume-2"
-              size={20}
+            <Speaker
+              width={20}
+              height={20}
               color={
                 pressed ? colors.WHITE_NORMAL : colors.SILVER_NORMAL_ACTIVE
               }

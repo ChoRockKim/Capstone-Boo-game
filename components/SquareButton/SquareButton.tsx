@@ -5,6 +5,7 @@ import { Pressable, StyleSheet, View } from "react-native";
 import { SvgProps } from "react-native-svg";
 
 interface SquareButtonProps {
+  allowDisabledPress?: boolean;
   disabled?: boolean;
   Icon: React.FC<SvgProps>;
   onPress?: () => void;
@@ -12,13 +13,14 @@ interface SquareButtonProps {
 }
 
 const SquareButton = ({
+  allowDisabledPress = false,
   disabled = false,
   Icon,
   onPress,
   size = "S",
 }: SquareButtonProps) => {
   const handlePress = () => {
-    if (disabled) {
+    if (disabled && !allowDisabledPress) {
       return;
     }
 
@@ -28,7 +30,7 @@ const SquareButton = ({
 
   return (
     <Pressable
-      disabled={disabled}
+      disabled={disabled && !allowDisabledPress}
       onPress={handlePress}
       style={({ pressed }) => [
         {
@@ -38,7 +40,7 @@ const SquareButton = ({
         },
         styles.button,
         disabled && styles.disabledButton,
-        pressed && styles.pressedButton,
+        pressed && !disabled && styles.pressedButton,
       ]}
     >
       {({ pressed }) => (

@@ -5,7 +5,10 @@ import {
   preloadBackgroundMusicTracks,
   setBackgroundMusicVolume,
 } from "@/utils/backgroundMusic";
-import { setSoundEffectsVolume } from "@/utils/soundEffects";
+import {
+  preloadSoundEffects,
+  setSoundEffectsVolume,
+} from "@/utils/soundEffects";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useFonts } from "expo-font";
 import { Image as ExpoImage } from "expo-image";
@@ -109,6 +112,7 @@ export default function RootLayout() {
   useEffect(() => {
     if (loaded && assetsLoaded) {
       preloadBackgroundMusicTracks();
+      preloadSoundEffects();
       SplashScreen.hideAsync();
     }
   }, [assetsLoaded, loaded]);

@@ -21,8 +21,12 @@ import {
 } from "react-native";
 
 interface DeveloperPanelProps {
+  onActionFeedback: (title: string, message?: string) => void;
+  onMealStateChanged?: () => void;
   setIsDeveloperPanelOpen: (value: boolean) => void;
 }
+
+type DeveloperInputField = "booName" | "studentId" | "userName";
 
 const GRADE_OPTIONS: CharacterGrade[] = [1, 2, 3, 4];
 const CHARACTER_STATE_OPTIONS: CharacterState[] = [
@@ -41,6 +45,7 @@ const MEAL_DAY_MODE_OPTIONS: { label: string; value: MealDayMode }[] = [
   { label: "평일", value: "weekday" },
   { label: "주말", value: "weekend" },
 ];
+const HANGUL_JAMO_REGEX = /[ㄱ-ㅎㅏ-ㅣ]/;
 
 type DeveloperChipButtonProps = {
   active?: boolean;
@@ -73,14 +78,20 @@ const DeveloperChipButton = ({
 );
 
 type DeveloperInputRowProps = {
+  error?: string;
+  inputMode?: "decimal" | "email" | "none" | "numeric" | "search" | "tel" | "text" | "url";
   label: string;
+  maxLength?: number;
   onApply: () => void;
   onChangeText: (text: string) => void;
   value: string;
 };
 
 const DeveloperInputRow = ({
+  error,
+  inputMode,
   label,
+  maxLength,
   onApply,
   onChangeText,
   value,
@@ -89,11 +100,13 @@ const DeveloperInputRow = ({
     <Text style={styles.inputLabel}>{label}</Text>
     <View style={styles.inputActionRow}>
       <TextInput
-        style={styles.input}
+        style={[styles.input, error && styles.inputError]}
         value={value}
         onChangeText={onChangeText}
         placeholder={label}
         placeholderTextColor={colors.SILVER_NORMAL}
+        inputMode={inputMode}
+        maxLength={maxLength}
       />
       <Pressable
         onPress={onApply}
@@ -114,10 +127,18 @@ const DeveloperInputRow = ({
         )}
       </Pressable>
     </View>
+    {error ? <Text style={styles.inputErrorText}>{error}</Text> : null}
   </View>
 );
 
-const DeveloperPanel = ({ setIsDeveloperPanelOpen }: DeveloperPanelProps) => {
+const DeveloperPanel = ({
+  onActionFeedback,
+  onMealStateChanged,
+  setIsDeveloperPanelOpen,
+}: DeveloperPanelProps) => {
+  const addSkippedMealForTest = useGameStore(
+    (state) => state.addSkippedMealForTest,
+  );
   const adjustCoin = useGameStore((state) => state.adjustCoin);
   const adjustXp = useGameStore((state) => state.adjustXp);
   const booName = useGameStore((state) => state.booName);
@@ -157,6 +178,9 @@ const DeveloperPanel = ({ setIsDeveloperPanelOpen }: DeveloperPanelProps) => {
   const [booNameInput, setBooNameInput] = useState(booName);
   const [studentIdInput, setStudentIdInput] = useState(studentId);
   const [userNameInput, setUserNameInput] = useState(userName);
+  const [inputErrors, setInputErrors] = useState<
+    Partial<Record<DeveloperInputField, string>>
+  >({});
   const xpProgress = useMemo(() => getXpProgressInfo(totalXp), [totalXp]);
 
   useEffect(() => {
@@ -179,6 +203,66 @@ const DeveloperPanel = ({ setIsDeveloperPanelOpen }: DeveloperPanelProps) => {
 
   const handleClose = () => {
     setIsDeveloperPanelOpen(false);
+  };
+
+  const showFeedback = (title: string, message?: string) => {
+    onActionFeedback(title, message);
+  };
+
+  const setInputError = (
+    field: DeveloperInputField,
+    errorMessage?: string,
+  ) => {
+    setInputErrors((prev) => {
+      if (!errorMessage) {
+        const { [field]: _removed, ...rest } = prev;
+
+        return rest;
+      }
+
+      return {
+        ...prev,
+        [field]: errorMessage,
+      };
+    });
+  };
+
+  const validateBooName = (value: string) => {
+    const nextBooName = value.trim();
+
+    if (nextBooName.length < 1) {
+      return "부 이름은 1자 이상 입력해주세요";
+    }
+
+    if (HANGUL_JAMO_REGEX.test(nextBooName)) {
+      return "자음이나 모음만 입력할 수 없어요";
+    }
+
+    return null;
+  };
+
+  const validateUserName = (value: string) => {
+    const nextUserName = value.trim();
+
+    if (nextUserName.length < 2) {
+      return "이름은 2자 이상 입력해주세요";
+    }
+
+    if (HANGUL_JAMO_REGEX.test(nextUserName)) {
+      return "자음이나 모음만 입력할 수 없어요";
+    }
+
+    return null;
+  };
+
+  const validateStudentId = (value: string) => {
+    const nextStudentId = value.trim();
+
+    if (!/^\d{9}$/.test(nextStudentId)) {
+      return "학번은 숫자 9자리여야 해요";
+    }
+
+    return null;
   };
 
   return (
@@ -218,7 +302,10 @@ const DeveloperPanel = ({ setIsDeveloperPanelOpen }: DeveloperPanelProps) => {
                 <DeveloperChipButton
                   key={`coin-${delta}`}
                   label={`${delta > 0 ? "+" : ""}${delta}`}
-                  onPress={() => adjustCoin(delta)}
+                  onPress={() => {
+                    adjustCoin(delta);
+                    showFeedback("코인을 변경했어요", `${delta > 0 ? "+" : ""}${delta}`);
+                  }}
                 />
               ))}
             </View>
@@ -233,16 +320,20 @@ const DeveloperPanel = ({ setIsDeveloperPanelOpen }: DeveloperPanelProps) => {
                 <DeveloperChipButton
                   key={`xp-${delta}`}
                   label={`${delta > 0 ? "+" : ""}${delta}`}
-                  onPress={() => adjustXp(delta)}
+                  onPress={() => {
+                    adjustXp(delta);
+                    showFeedback("XP를 변경했어요", `${delta > 0 ? "+" : ""}${delta} XP`);
+                  }}
                 />
               ))}
               <DeveloperChipButton
                 label="가득"
-                onPress={() =>
+                onPress={() => {
                   adjustXp(
                     xpProgress.progressMaxXp - xpProgress.currentXpInGrade,
-                  )
-                }
+                  );
+                  showFeedback("현재 학년 XP를 가득 채웠어요");
+                }}
               />
             </View>
             <View style={styles.metricCard}>
@@ -258,20 +349,74 @@ const DeveloperPanel = ({ setIsDeveloperPanelOpen }: DeveloperPanelProps) => {
             <DeveloperInputRow
               label="부 이름"
               value={booNameInput}
-              onChangeText={setBooNameInput}
-              onApply={() => setBooName(booNameInput.trim() || booName)}
+              error={inputErrors.booName}
+              maxLength={8}
+              onChangeText={(text) => {
+                setBooNameInput(text);
+                setInputError("booName");
+              }}
+              onApply={() => {
+                const errorMessage = validateBooName(booNameInput);
+
+                if (errorMessage) {
+                  setInputError("booName", errorMessage);
+                  showFeedback("부 이름을 바꾸지 못했어요", errorMessage);
+                  return;
+                }
+
+                const nextBooName = booNameInput.trim() || booName;
+                setBooName(nextBooName);
+                setInputError("booName");
+                showFeedback("부 이름을 변경했어요", nextBooName);
+              }}
             />
             <DeveloperInputRow
               label="유저 이름"
               value={userNameInput}
-              onChangeText={setUserNameInput}
-              onApply={() => setUserName(userNameInput.trim() || userName)}
+              error={inputErrors.userName}
+              onChangeText={(text) => {
+                setUserNameInput(text);
+                setInputError("userName");
+              }}
+              onApply={() => {
+                const errorMessage = validateUserName(userNameInput);
+
+                if (errorMessage) {
+                  setInputError("userName", errorMessage);
+                  showFeedback("유저 이름을 바꾸지 못했어요", errorMessage);
+                  return;
+                }
+
+                const nextUserName = userNameInput.trim() || userName;
+                setUserName(nextUserName);
+                setInputError("userName");
+                showFeedback("유저 이름을 변경했어요", nextUserName);
+              }}
             />
             <DeveloperInputRow
               label="학번"
               value={studentIdInput}
-              onChangeText={setStudentIdInput}
-              onApply={() => setStudentId(studentIdInput.trim() || studentId)}
+              error={inputErrors.studentId}
+              inputMode="numeric"
+              maxLength={9}
+              onChangeText={(text) => {
+                setStudentIdInput(text.replace(/[^0-9]/g, ""));
+                setInputError("studentId");
+              }}
+              onApply={() => {
+                const errorMessage = validateStudentId(studentIdInput);
+
+                if (errorMessage) {
+                  setInputError("studentId", errorMessage);
+                  showFeedback("학번을 바꾸지 못했어요", errorMessage);
+                  return;
+                }
+
+                const nextStudentId = studentIdInput.trim() || studentId;
+                setStudentId(nextStudentId);
+                setInputError("studentId");
+                showFeedback("학번을 변경했어요", nextStudentId);
+              }}
             />
           </View>
 
@@ -283,13 +428,19 @@ const DeveloperPanel = ({ setIsDeveloperPanelOpen }: DeveloperPanelProps) => {
                   key={`grade-${gradeOption}`}
                   label={`${gradeOption}학년`}
                   active={xpProgress.grade === gradeOption}
-                  onPress={() => setGrade(gradeOption)}
+                  onPress={() => {
+                    setGrade(gradeOption);
+                    showFeedback("학년을 변경했어요", `${gradeOption}학년`);
+                  }}
                 />
               ))}
               <DeveloperChipButton
                 label="졸업 직전"
                 active={totalXp === 8999}
-                onPress={() => setTotalXp(8999)}
+                onPress={() => {
+                  setTotalXp(8999);
+                  showFeedback("졸업 직전 XP로 이동했어요");
+                }}
               />
             </View>
           </View>
@@ -302,7 +453,13 @@ const DeveloperPanel = ({ setIsDeveloperPanelOpen }: DeveloperPanelProps) => {
                   key={stateOption}
                   label={CHARACTER_STATE_LABELS[stateOption]}
                   active={characterState === stateOption}
-                  onPress={() => setCharacterState(stateOption)}
+                  onPress={() => {
+                    setCharacterState(stateOption);
+                    showFeedback(
+                      "부 상태를 변경했어요",
+                      CHARACTER_STATE_LABELS[stateOption],
+                    );
+                  }}
                 />
               ))}
             </View>
@@ -326,7 +483,10 @@ const DeveloperPanel = ({ setIsDeveloperPanelOpen }: DeveloperPanelProps) => {
                   key={option.value}
                   label={option.label}
                   active={mealDayMode === option.value}
-                  onPress={() => setMealDayMode(option.value)}
+                  onPress={() => {
+                    setMealDayMode(option.value);
+                    showFeedback("학식 모드를 변경했어요", option.label);
+                  }}
                 />
               ))}
             </View>
@@ -343,15 +503,41 @@ const DeveloperPanel = ({ setIsDeveloperPanelOpen }: DeveloperPanelProps) => {
             <View style={styles.chipRow}>
               <DeveloperChipButton
                 label={`시간 제한 ${mealRestrictionEnabled ? "끄기" : "켜기"}`}
-                onPress={toggleMealRestrictionEnabled}
+                onPress={() => {
+                  toggleMealRestrictionEnabled();
+                  showFeedback(
+                    "식사 시간 제한을 변경했어요",
+                    mealRestrictionEnabled ? "OFF" : "ON",
+                  );
+                }}
               />
               <DeveloperChipButton
                 label="식사 기록 초기화"
-                onPress={clearMealHistory}
+                onPress={() => {
+                  clearMealHistory();
+                  syncMealStatus(false);
+                  onMealStateChanged?.();
+                  showFeedback("식사 기록을 초기화했어요");
+                }}
+              />
+              <DeveloperChipButton
+                label="거른 끼니 +1"
+                onPress={() => {
+                  addSkippedMealForTest();
+                  onMealStateChanged?.();
+                  showFeedback(
+                    "거른 끼니를 추가했어요",
+                    `${useGameStore.getState().skippedMealCount}끼니`,
+                  );
+                }}
               />
               <DeveloperChipButton
                 label="결식 상태 동기화"
-                onPress={() => syncMealStatus(false)}
+                onPress={() => {
+                  syncMealStatus(false);
+                  onMealStateChanged?.();
+                  showFeedback("결식 상태를 다시 계산했어요");
+                }}
               />
             </View>
           </View>
@@ -370,11 +556,20 @@ const DeveloperPanel = ({ setIsDeveloperPanelOpen }: DeveloperPanelProps) => {
             <View style={styles.chipRow}>
               <DeveloperChipButton
                 label={`문제 수 제한 ${quizDailyLimitEnabled ? "끄기" : "켜기"}`}
-                onPress={toggleQuizDailyLimitEnabled}
+                onPress={() => {
+                  toggleQuizDailyLimitEnabled();
+                  showFeedback(
+                    "퀴즈 문제 수 제한을 변경했어요",
+                    quizDailyLimitEnabled ? "OFF" : "ON",
+                  );
+                }}
               />
               <DeveloperChipButton
                 label="퀴즈 기록 초기화"
-                onPress={clearQuizHistory}
+                onPress={() => {
+                  clearQuizHistory();
+                  showFeedback("퀴즈 기록을 초기화했어요");
+                }}
               />
             </View>
           </View>
@@ -389,7 +584,10 @@ const DeveloperPanel = ({ setIsDeveloperPanelOpen }: DeveloperPanelProps) => {
                 color="gray"
                 size="S"
                 label="게임 상태 초기화"
-                onPress={resetGameState}
+                onPress={() => {
+                  resetGameState();
+                  showFeedback("게임 상태를 초기화했어요");
+                }}
                 width={284}
               />
             </View>
@@ -561,6 +759,16 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 18,
     color: colors.BLACK_NORMAL,
+    includeFontPadding: false,
+  },
+  inputError: {
+    borderColor: colors.DANGER,
+  },
+  inputErrorText: {
+    fontFamily: fonts.BASIC,
+    fontSize: 11,
+    lineHeight: 16,
+    color: colors.DANGER,
     includeFontPadding: false,
   },
   applyButton: {

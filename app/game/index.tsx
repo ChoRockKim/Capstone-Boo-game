@@ -7,6 +7,7 @@ import user from "@/assets/icons/users-multiple.svg";
 import BooChat from "@/components/BooChat/BooChat";
 import {
   getEvolutionBooChat,
+  getQuizCorrectBooChat,
   getRandomAutoBooChat,
   getRandomTapBooChat,
 } from "@/components/BooChat/BooChatList";
@@ -28,14 +29,21 @@ import MyProfile from "@/components/MyProfile/MyProfile";
 import Options from "@/components/Options/Options";
 import ProgressBar from "@/components/ProgressBar/ProgressBar";
 import QuizPanel from "@/components/QuizPanel/QuizPanel";
+import {
+  formatQuizCooldownRemaining,
+  getAvailableQuizQuestions,
+  getNextQuizAvailabilityTime,
+  getQuizDailyCountForDate,
+  QUIZ_DAILY_LIMIT,
+} from "@/components/QuizPanel/QuizData";
 import SoundSettings from "@/components/SoundSettings/SoundSettings";
 import SquareButton from "@/components/SquareButton/SquareButton";
 import TopAlert from "@/components/TopAlert/TopAlert";
+import type { CharacterState } from "@/constants/character";
 import { colors } from "@/constants/colors";
 import { fonts } from "@/constants/fonts";
-import type { CharacterState } from "@/constants/character";
-import { useGameStore } from "@/stores/useGameStore";
 import type { PendingEvolution } from "@/stores/useGameStore";
+import { useGameStore } from "@/stores/useGameStore";
 import { useTodayMeal } from "@/useHook/useTodayMeal";
 import {
   pauseBackgroundMusicForOverlay,
@@ -48,10 +56,7 @@ import {
   type TodayMealSection,
 } from "@/utils/getTodayMeal";
 import { playSoundEffect } from "@/utils/soundEffects";
-import {
-  getRequiredXpForGrade,
-  getXpProgressInfo,
-} from "@/utils/xpProgress";
+import { getRequiredXpForGrade, getXpProgressInfo } from "@/utils/xpProgress";
 import { Image } from "expo-image";
 import { router, useFocusEffect } from "expo-router";
 import { StatusBar } from "expo-status-bar";
@@ -74,6 +79,8 @@ const EVOLUTION_CONGRAT_SOUND_EARLY_MS = 500;
 const EVOLUTION_CONGRAT_SOUND_DURATION_MS = 5042;
 const EVOLUTION_ALERT_SUCCESS_MS = 4000;
 const EVOLUTION_HAPPY_STATE_DURATION_MS = 10000;
+const QUIZ_CORRECT_HAPPY_DURATION_MS = 5000;
+const QUIZ_CORRECT_BOO_CHAT_DURATION_MS = 2600;
 const EVOLUTION_POST_SUCCESS_SETTLE_MS = Math.max(
   EVOLUTION_ALERT_SUCCESS_MS,
   EVOLUTION_CONGRAT_SOUND_DURATION_MS - EVOLUTION_CONGRAT_SOUND_EARLY_MS,
@@ -89,11 +96,21 @@ const resolvePostEvolutionCharacterState = (
   return characterState;
 };
 
+const getNextQuizDailyResetAt = (date: Date) => {
+  const nextDate = new Date(date);
+
+  nextDate.setDate(nextDate.getDate() + 1);
+  nextDate.setHours(0, 0, 0, 0);
+
+  return nextDate;
+};
+
 type TopAlertState = {
   autoHideDuration: number;
   closable: boolean;
   id: number;
   message: string;
+  textSize: "compact" | "default";
   title: string;
   visible: boolean;
 };
@@ -101,6 +118,9 @@ type TopAlertState = {
 export default function Index() {
   const insets = useSafeAreaInsets();
   const booChatTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const quizCorrectHappyTimeoutRef = useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null);
   const evolutionStartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
@@ -126,15 +146,16 @@ export default function Index() {
   const [isCharacterReady, setIsCharacterReady] = useState(false);
   const [activeEvolution, setActiveEvolution] =
     useState<PendingEvolution | null>(null);
-  const [evolutionPhase, setEvolutionPhase] = useState<"blink" | "smoke" | null>(
-    null,
-  );
+  const [evolutionPhase, setEvolutionPhase] = useState<
+    "blink" | "smoke" | null
+  >(null);
   const [mealNow, setMealNow] = useState(() => new Date());
   const [topAlert, setTopAlert] = useState<TopAlertState>({
     autoHideDuration: 2600,
     closable: true,
     id: 0,
     message: "",
+    textSize: "default",
     title: "",
     visible: false,
   });
@@ -153,6 +174,14 @@ export default function Index() {
     (state) => state.mealRestrictionEnabled,
   );
   const pendingEvolution = useGameStore((state) => state.pendingEvolution);
+  const quizAttemptHistory = useGameStore((state) => state.quizAttemptHistory);
+  const quizDailyCount = useGameStore((state) => state.quizDailyCount);
+  const quizDailyCountDateKey = useGameStore(
+    (state) => state.quizDailyCountDateKey,
+  );
+  const quizDailyLimitEnabled = useGameStore(
+    (state) => state.quizDailyLimitEnabled,
+  );
   const setCharacterState = useGameStore((state) => state.setCharacterState);
   const syncMealStatus = useGameStore((state) => state.syncMealStatus);
   const totalXp = useGameStore((state) => state.totalXp);
@@ -162,7 +191,8 @@ export default function Index() {
   const isGameVisualReady = isBackgroundReady && isCharacterReady;
   const xpProgress = useMemo(() => getXpProgressInfo(totalXp), [totalXp]);
   const evolutionDisplaySource =
-    activeEvolution && (evolutionPhase === "blink" || evolutionPhase === "smoke")
+    activeEvolution &&
+    (evolutionPhase === "blink" || evolutionPhase === "smoke")
       ? activeEvolution
       : pendingEvolution;
   const displayedGrade = evolutionDisplaySource?.fromGrade ?? xpProgress.grade;
@@ -182,10 +212,45 @@ export default function Index() {
     lastFedMeals,
     mealRestrictionEnabled,
   );
-  const isMealButtonDisabled = mealAvailability.shouldShowCountdown;
+  const isMealButtonDisabled =
+    mealRestrictionEnabled && !mealAvailability.canFeedNow;
   const mealCountdownText = mealAvailability.shouldShowCountdown
     ? formatMealCountdown(mealAvailability.nextMeal.startsAt, mealNow)
     : "";
+  const quizCountToday = getQuizDailyCountForDate(
+    quizDailyCount,
+    quizDailyCountDateKey,
+    mealNow,
+  );
+  const availableQuizQuestions = useMemo(
+    () =>
+      getAvailableQuizQuestions(quizAttemptHistory, mealNow, {
+        ignoreCooldown: !quizDailyLimitEnabled,
+      }),
+    [mealNow, quizAttemptHistory, quizDailyLimitEnabled],
+  );
+  const nextQuizAvailableAt = useMemo(
+    () =>
+      quizDailyLimitEnabled
+        ? getNextQuizAvailabilityTime(quizAttemptHistory, mealNow)
+        : null,
+    [mealNow, quizAttemptHistory, quizDailyLimitEnabled],
+  );
+  const isQuizDailyLimitReached =
+    quizDailyLimitEnabled && quizCountToday >= QUIZ_DAILY_LIMIT;
+  const isQuizCooldownLocked =
+    quizDailyLimitEnabled &&
+    !isQuizDailyLimitReached &&
+    availableQuizQuestions.length === 0;
+  const isQuizButtonDisabled =
+    isQuizDailyLimitReached || isQuizCooldownLocked;
+  const nextQuizUnlockAt = isQuizDailyLimitReached
+    ? getNextQuizDailyResetAt(mealNow)
+    : nextQuizAvailableAt;
+  const quizCountdownText =
+    isQuizButtonDisabled && nextQuizUnlockAt
+      ? formatMealCountdown(nextQuizUnlockAt, mealNow)
+      : "";
 
   useFocusEffect(
     useCallback(() => {
@@ -206,23 +271,13 @@ export default function Index() {
   }, []);
 
   useEffect(() => {
-    syncMealStatus();
-
-    const mealStatusSyncTimer = setInterval(() => {
-      if (isEvolutionBusyRef.current) {
-        return;
-      }
-
-      syncMealStatus();
-    }, MEAL_STATUS_SYNC_INTERVAL_MS);
-
-    return () => clearInterval(mealStatusSyncTimer);
-  }, [syncMealStatus]);
-
-  useEffect(() => {
     return () => {
       if (booChatTimeoutRef.current) {
         clearTimeout(booChatTimeoutRef.current);
+      }
+
+      if (quizCorrectHappyTimeoutRef.current) {
+        clearTimeout(quizCorrectHappyTimeoutRef.current);
       }
 
       if (evolutionStartTimerRef.current) {
@@ -289,6 +344,13 @@ export default function Index() {
     evolutionSequenceTimersRef.current = [];
   }, []);
 
+  const clearQuizCorrectHappyTimer = useCallback(() => {
+    if (quizCorrectHappyTimeoutRef.current) {
+      clearTimeout(quizCorrectHappyTimeoutRef.current);
+      quizCorrectHappyTimeoutRef.current = null;
+    }
+  }, []);
+
   const queueEvolutionTimer = useCallback(
     (callback: () => void, delay: number) => {
       const timer = setTimeout(() => {
@@ -303,9 +365,14 @@ export default function Index() {
   );
 
   const stopEvolutionAudioAndTimers = useCallback(() => {
+    clearQuizCorrectHappyTimer();
     clearEvolutionStartTimer();
     clearEvolutionSequenceTimers();
-  }, [clearEvolutionSequenceTimers, clearEvolutionStartTimer]);
+  }, [
+    clearEvolutionSequenceTimers,
+    clearEvolutionStartTimer,
+    clearQuizCorrectHappyTimer,
+  ]);
 
   const hideBooChatNow = useCallback(() => {
     if (booChatTimeoutRef.current) {
@@ -317,30 +384,32 @@ export default function Index() {
     setIsBooChatVisible(false);
   }, []);
 
-  const showBooChat = useCallback((
-    message: string,
-    options?: { durationMs?: number; force?: boolean },
-  ) => {
-    if (isEvolutionBusyRef.current && !options?.force) {
-      return;
-    }
+  const showBooChat = useCallback(
+    (message: string, options?: { durationMs?: number; force?: boolean }) => {
+      if (isEvolutionBusyRef.current && !options?.force) {
+        return;
+      }
 
-    if (booChatTimeoutRef.current) {
-      clearTimeout(booChatTimeoutRef.current);
-    }
+      if (booChatTimeoutRef.current) {
+        clearTimeout(booChatTimeoutRef.current);
+      }
 
-    setBooChatMessage(message);
-    isBooChatVisibleRef.current = true;
-    setIsBooChatVisible(true);
+      setBooChatMessage(message);
+      isBooChatVisibleRef.current = true;
+      setIsBooChatVisible(true);
 
-    booChatTimeoutRef.current = setTimeout(() => {
-      isBooChatVisibleRef.current = false;
-      setIsBooChatVisible(false);
-    }, options?.durationMs ?? BOO_CHAT_DURATION_MS);
-  }, []);
+      booChatTimeoutRef.current = setTimeout(() => {
+        isBooChatVisibleRef.current = false;
+        setIsBooChatVisible(false);
+      }, options?.durationMs ?? BOO_CHAT_DURATION_MS);
+    },
+    [],
+  );
 
   const getContextualBooChatMessage = useCallback(() => {
-    const mealTalkMessage = getTodayMealTalkMessage(todayMealSectionsRef.current);
+    const mealTalkMessage = getTodayMealTalkMessage(
+      todayMealSectionsRef.current,
+    );
 
     if (mealTalkMessage) {
       return mealTalkMessage;
@@ -374,13 +443,18 @@ export default function Index() {
     (
       title: string,
       message: string,
-      options?: { autoHideDuration?: number; closable?: boolean },
+      options?: {
+        autoHideDuration?: number;
+        closable?: boolean;
+        textSize?: "compact" | "default";
+      },
     ) => {
       setTopAlert((prev) => ({
         autoHideDuration: options?.autoHideDuration ?? 2600,
         closable: options?.closable ?? true,
         id: prev.id + 1,
         message,
+        textSize: options?.textSize ?? "default",
         title,
         visible: true,
       }));
@@ -394,6 +468,44 @@ export default function Index() {
       visible: false,
     }));
   }, []);
+
+  const showSkippedMealPenaltyAlert = useCallback(
+    (xpPenalty: number) => {
+      if (xpPenalty <= 0) {
+        return;
+      }
+
+      showTopAlert(
+        "끼니를 걸렀어요",
+        `부가 배고파해서 XP가 ${xpPenalty} 감소했어요.`,
+        {
+          autoHideDuration: 2400,
+          textSize: "compact",
+        },
+      );
+    },
+    [showTopAlert],
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      const syncResult = syncMealStatus();
+      showSkippedMealPenaltyAlert(syncResult.xpPenalty);
+    }, [showSkippedMealPenaltyAlert, syncMealStatus]),
+  );
+
+  useEffect(() => {
+    const mealStatusSyncTimer = setInterval(() => {
+      if (isEvolutionBusyRef.current) {
+        return;
+      }
+
+      const syncResult = syncMealStatus();
+      showSkippedMealPenaltyAlert(syncResult.xpPenalty);
+    }, MEAL_STATUS_SYNC_INTERVAL_MS);
+
+    return () => clearInterval(mealStatusSyncTimer);
+  }, [showSkippedMealPenaltyAlert, syncMealStatus]);
 
   const startEvolutionSequence = useCallback(
     (evolution: PendingEvolution) => {
@@ -418,9 +530,14 @@ export default function Index() {
         setEvolutionPhase("smoke");
       }, EVOLUTION_BLINK_DURATION_MS);
 
-      queueEvolutionTimer(() => {
-        playSoundEffect("congratulation");
-      }, EVOLUTION_BLINK_DURATION_MS + EVOLUTION_SMOKE_DURATION_MS - EVOLUTION_CONGRAT_SOUND_EARLY_MS);
+      queueEvolutionTimer(
+        () => {
+          playSoundEffect("congratulation");
+        },
+        EVOLUTION_BLINK_DURATION_MS +
+          EVOLUTION_SMOKE_DURATION_MS -
+          EVOLUTION_CONGRAT_SOUND_EARLY_MS,
+      );
 
       queueEvolutionTimer(() => {
         setEvolutionPhase(null);
@@ -433,29 +550,39 @@ export default function Index() {
           `${booName}이(가) ${evolution.toGrade}학년으로 진화했다!`,
           "",
           {
-          autoHideDuration: EVOLUTION_ALERT_SUCCESS_MS,
-          closable: false,
+            autoHideDuration: EVOLUTION_ALERT_SUCCESS_MS,
+            closable: false,
           },
         );
       }, EVOLUTION_BLINK_DURATION_MS + EVOLUTION_SMOKE_DURATION_MS);
 
-      queueEvolutionTimer(() => {
-        resumeBackgroundMusicAfterOverlay();
-        setActiveEvolution(null);
-      }, EVOLUTION_BLINK_DURATION_MS + EVOLUTION_SMOKE_DURATION_MS + EVOLUTION_POST_SUCCESS_SETTLE_MS);
+      queueEvolutionTimer(
+        () => {
+          resumeBackgroundMusicAfterOverlay();
+          setActiveEvolution(null);
+        },
+        EVOLUTION_BLINK_DURATION_MS +
+          EVOLUTION_SMOKE_DURATION_MS +
+          EVOLUTION_POST_SUCCESS_SETTLE_MS,
+      );
 
-      queueEvolutionTimer(() => {
-        const nextCharacterState = resolvePostEvolutionCharacterState(
-          evolution.resumeState,
-        );
+      queueEvolutionTimer(
+        () => {
+          const nextCharacterState = resolvePostEvolutionCharacterState(
+            evolution.resumeState,
+          );
 
-        if (evolution.trigger === "meal") {
-          setCharacterState(nextCharacterState);
-          syncMealStatus(false);
-        } else {
-          setCharacterState(nextCharacterState);
-        }
-      }, EVOLUTION_BLINK_DURATION_MS + EVOLUTION_SMOKE_DURATION_MS + EVOLUTION_HAPPY_STATE_DURATION_MS);
+          if (evolution.trigger === "meal") {
+            setCharacterState(nextCharacterState);
+            syncMealStatus(false);
+          } else {
+            setCharacterState(nextCharacterState);
+          }
+        },
+        EVOLUTION_BLINK_DURATION_MS +
+          EVOLUTION_SMOKE_DURATION_MS +
+          EVOLUTION_HAPPY_STATE_DURATION_MS,
+      );
     },
     [
       clearPendingEvolution,
@@ -579,6 +706,7 @@ export default function Index() {
       return;
     }
 
+    playSoundEffect("booTouch");
     showBooChat(getRandomTapBooChat(characterState));
   };
 
@@ -597,6 +725,90 @@ export default function Index() {
     setIsQuizOpen((prev) => !prev);
   };
 
+  const showMealUnavailableAlert = useCallback(() => {
+    const countdownText = formatMealCountdown(
+      mealAvailability.nextMeal.startsAt,
+      mealNow,
+    );
+
+    showTopAlert(
+      "다음 학식까지 기다려주세요",
+      `${mealAvailability.nextMeal.title}까지 ${countdownText}`,
+      {
+        autoHideDuration: 1800,
+        textSize: "compact",
+      },
+    );
+  }, [mealAvailability, mealNow, showTopAlert]);
+
+  const showQuizUnavailableAlert = useCallback(() => {
+    if (isQuizDailyLimitReached) {
+      const resetCountdownText = formatMealCountdown(
+        getNextQuizDailyResetAt(mealNow),
+        mealNow,
+      );
+
+      showTopAlert(
+        "오늘 퀴즈는 완료했어요",
+        `${resetCountdownText} 뒤에 열려요.`,
+        {
+          autoHideDuration: 1800,
+          textSize: "compact",
+        },
+      );
+      return;
+    }
+
+    const remainingText = nextQuizAvailableAt
+      ? formatQuizCooldownRemaining(nextQuizAvailableAt, mealNow)
+      : "조금";
+
+    showTopAlert(
+      "다음 퀴즈까지 기다려주세요",
+      `${remainingText} 뒤에 열려요.`,
+      {
+        autoHideDuration: 1800,
+        textSize: "compact",
+      },
+    );
+  }, [isQuizDailyLimitReached, mealNow, nextQuizAvailableAt, showTopAlert]);
+
+  const handleQuizResultAlert = useCallback(
+    (isCorrect: boolean) => {
+      playSoundEffect(isCorrect ? "quizO" : "quizX");
+
+      showTopAlert(
+        isCorrect ? "퀴즈 정답!" : "퀴즈 오답!",
+        isCorrect ? "XP가 30 증가합니다" : "XP가 10 감소합니다",
+      );
+
+      if (!isCorrect) {
+        return;
+      }
+
+      const resumeState = resolvePostEvolutionCharacterState(
+        useGameStore.getState().characterState,
+      );
+
+      clearQuizCorrectHappyTimer();
+      setCharacterState("happy1");
+      showBooChat(getQuizCorrectBooChat(), {
+        durationMs: QUIZ_CORRECT_BOO_CHAT_DURATION_MS,
+      });
+
+      quizCorrectHappyTimeoutRef.current = setTimeout(() => {
+        quizCorrectHappyTimeoutRef.current = null;
+
+        if (isEvolutionBusyRef.current) {
+          return;
+        }
+
+        setCharacterState(resumeState);
+      }, QUIZ_CORRECT_HAPPY_DURATION_MS);
+    },
+    [clearQuizCorrectHappyTimer, setCharacterState, showBooChat, showTopAlert],
+  );
+
   return (
     <View style={styles.backgroundImage}>
       <StatusBar hidden={true} />
@@ -605,6 +817,7 @@ export default function Index() {
         closable={topAlert.closable}
         message={topAlert.message}
         onClose={hideTopAlert}
+        textSize={topAlert.textSize}
         title={topAlert.title}
         visibilityKey={topAlert.id}
         visible={topAlert.visible}
@@ -739,17 +952,38 @@ export default function Index() {
         >
           <View style={styles.bigButtonSlot}>
             <SquareButton
-              disabled={isEvolutionSequenceActive}
+              allowDisabledPress={
+                isQuizButtonDisabled && !isEvolutionSequenceActive
+              }
+              disabled={isQuizButtonDisabled || isEvolutionSequenceActive}
               Icon={cap}
-              onPress={handleQuizOpenPress}
+              onPress={() => {
+                if (isQuizButtonDisabled) {
+                  showQuizUnavailableAlert();
+                  return;
+                }
+
+                handleQuizOpenPress();
+              }}
               size="M"
             />
+            {quizCountdownText ? (
+              <Text style={styles.quizCountdownText}>{quizCountdownText}</Text>
+            ) : null}
           </View>
           <View style={styles.mealButtonColumn}>
             <SquareButton
+              allowDisabledPress={
+                isMealButtonDisabled && !isEvolutionSequenceActive
+              }
               disabled={isMealButtonDisabled || isEvolutionSequenceActive}
               Icon={meal}
               onPress={() => {
+                if (isMealButtonDisabled) {
+                  showMealUnavailableAlert();
+                  return;
+                }
+
                 if (isEvolutionBusy) {
                   return;
                 }
@@ -825,19 +1059,21 @@ export default function Index() {
       )}
       {isQuizOpen && (
         <QuizPanel
-          onQuizResultAlert={(isCorrect) =>
-            showTopAlert(
-              isCorrect ? "퀴즈 정답!" : "퀴즈 오답!",
-              isCorrect
-                ? "XP가 30 증가합니다"
-                : "XP가 10 감소합니다",
-            )
-          }
+          onQuizResultAlert={handleQuizResultAlert}
           setIsQuizOpen={setIsQuizOpen}
         />
       )}
       {isDeveloperPanelOpen && (
-        <DeveloperPanel setIsDeveloperPanelOpen={setIsDeveloperPanelOpen} />
+        <DeveloperPanel
+          onActionFeedback={(title, message) =>
+            showTopAlert(title, message ?? "", {
+              autoHideDuration: 1000,
+              textSize: "compact",
+            })
+          }
+          onMealStateChanged={() => setMealNow(new Date())}
+          setIsDeveloperPanelOpen={setIsDeveloperPanelOpen}
+        />
       )}
       {!isGameVisualReady && <LoadingOverlay />}
     </View>
@@ -899,6 +1135,8 @@ const styles = StyleSheet.create({
   bigButtonSlot: {
     width: BIG_BUTTON_HEIGHT,
     alignItems: "center",
+    height: BIG_BUTTON_HEIGHT,
+    position: "relative",
   },
   mealButtonColumn: {
     height: BIG_BUTTON_HEIGHT,
@@ -907,6 +1145,15 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   mealCountdownText: {
+    position: "absolute",
+    top: BIG_BUTTON_HEIGHT + 6,
+    fontSize: 16,
+    lineHeight: 20,
+    fontFamily: fonts.BASIC,
+    color: colors.DANGER,
+    includeFontPadding: false,
+  },
+  quizCountdownText: {
     position: "absolute",
     top: BIG_BUTTON_HEIGHT + 6,
     fontSize: 16,

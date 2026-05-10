@@ -169,10 +169,13 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     alignItems: "center",
     justifyContent: "center",
+    zIndex: 20,
+    elevation: 20,
   },
   characterImage: {
     width: "100%",
     height: "100%",
+    zIndex: 1,
   },
   characterSilhouette: {
     tintColor: "#FFFFFF",
@@ -181,6 +184,8 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     alignItems: "center",
     justifyContent: "center",
+    zIndex: 30,
+    elevation: 30,
   },
   bigSmoke: {
     width: "124%",

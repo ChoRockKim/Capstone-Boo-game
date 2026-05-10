@@ -276,13 +276,8 @@ export const getMealAvailabilityStatus = (
 ): MealAvailabilityStatus => {
   const activeMealSectionId = getActiveMealSectionId(date);
   const todayKey = getLocalDateKey(date);
-  const latestCompletedMealSectionId = getLatestCompletedMealSectionId(date);
   const hasFedCurrentMeal = Boolean(
     activeMealSectionId && lastFedMeals[activeMealSectionId] === todayKey,
-  );
-  const hasFedLatestCompletedMeal = Boolean(
-    latestCompletedMealSectionId &&
-      lastFedMeals[latestCompletedMealSectionId] === todayKey,
   );
 
   return {
@@ -293,8 +288,7 @@ export const getMealAvailabilityStatus = (
     hasFedCurrentMeal,
     shouldShowCountdown:
       mealRestrictionEnabled &&
-      (hasFedCurrentMeal ||
-        (!activeMealSectionId && hasFedLatestCompletedMeal)),
+      (!activeMealSectionId || hasFedCurrentMeal),
     nextMeal: getNextMeal(date),
   };
 };

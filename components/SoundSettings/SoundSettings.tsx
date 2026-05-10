@@ -53,17 +53,9 @@ const SoundSettings = ({
           value={masterVolume}
         />
         <View style={styles.divider} />
-        <SoundSlider
-          label="BGM"
-          onChange={setBgmVolume}
-          value={bgmVolume}
-        />
+        <SoundSlider label="BGM" onChange={setBgmVolume} value={bgmVolume} />
         <View style={styles.divider} />
-        <SoundSlider
-          label="효과음"
-          onChange={setSfxVolume}
-          value={sfxVolume}
-        />
+        <SoundSlider label="효과음" onChange={setSfxVolume} value={sfxVolume} />
       </View>
     </View>
   );

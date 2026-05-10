@@ -16,6 +16,12 @@ const EVOLUTION_BOO_CHAT_BY_GRADE: Record<CharacterGrade, string> = {
   4: "내가 4학년이라고...?? 응애 응애...",
 };
 
+const QUIZ_CORRECT_BOO_CHAT_MESSAGES = [
+  "오 나 찍었는데 맞혔네!?",
+  "이번건 조금 어려웠어",
+  "후후 나 좀 똑똑한 듯?",
+];
+
 const BOO_CHAT_LIST_BY_MODE: Record<
   BooChatMode,
   Record<BooChatCategory, string[]>
@@ -129,5 +135,13 @@ export const getRandomTapBooChat = (
 
 export const getEvolutionBooChat = (grade: CharacterGrade) =>
   EVOLUTION_BOO_CHAT_BY_GRADE[grade];
+
+export const getQuizCorrectBooChat = () => {
+  const randomIndex = Math.floor(
+    Math.random() * QUIZ_CORRECT_BOO_CHAT_MESSAGES.length,
+  );
+
+  return QUIZ_CORRECT_BOO_CHAT_MESSAGES[randomIndex];
+};
 
 export const getRandomBooChat = getRandomTapBooChat;

@@ -17,6 +17,7 @@ interface TopAlertProps {
   closable?: boolean;
   message?: string;
   onClose: () => void;
+  textSize?: "compact" | "default";
   title: string;
   visible: boolean;
   visibilityKey?: number;
@@ -30,6 +31,7 @@ function TopAlert({
   closable = true,
   message,
   onClose,
+  textSize = "default",
   title,
   visible,
   visibilityKey = 0,
@@ -114,8 +116,24 @@ function TopAlert({
           ]}
         >
           <View style={styles.textGroup}>
-            <Text style={styles.title}>{title}</Text>
-            {!!message && <Text style={styles.message}>{message}</Text>}
+            <Text
+              style={[
+                styles.title,
+                textSize === "compact" && styles.titleCompact,
+              ]}
+            >
+              {title}
+            </Text>
+            {!!message && (
+              <Text
+                style={[
+                  styles.message,
+                  textSize === "compact" && styles.messageCompact,
+                ]}
+              >
+                {message}
+              </Text>
+            )}
           </View>
           {closable ? (
             <Pressable onPress={handleClosePress} style={styles.closeButton}>
@@ -165,12 +183,20 @@ const styles = StyleSheet.create({
     color: colors.BLACK_NORMAL,
     includeFontPadding: false,
   },
+  titleCompact: {
+    fontSize: 20,
+    lineHeight: 28,
+  },
   message: {
     fontFamily: fonts.BASIC,
     fontSize: 22,
     lineHeight: 30,
     color: colors.BLACK_NORMAL,
     includeFontPadding: false,
+  },
+  messageCompact: {
+    fontSize: 20,
+    lineHeight: 28,
   },
   closeButton: {
     alignItems: "center",

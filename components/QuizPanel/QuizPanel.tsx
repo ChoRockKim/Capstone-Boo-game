@@ -167,6 +167,11 @@ function QuizPanel({ onQuizResultAlert, setIsQuizOpen }: QuizPanelProps) {
         return;
       }
 
+      if (quizDailyLimitEnabled) {
+        closeQuizPanel();
+        return;
+      }
+
       moveToNextQuestion();
       return;
     }

@@ -60,6 +60,11 @@ export type PendingEvolution = {
   trigger: EvolutionTrigger;
 };
 
+export type MealStatusSyncResult = {
+  skippedMealCount: number;
+  xpPenalty: number;
+};
+
 type GameStoreState = {
   appliedSkippedMealPenaltyCount: number;
   booName: string;
@@ -88,6 +93,7 @@ type GameStoreState = {
 type GameStoreActions = {
   adjustCoin: (delta: number) => void;
   adjustXp: (delta: number) => void;
+  addSkippedMealForTest: () => void;
   addFriend: (friend: FriendListItem) => void;
   clearPendingEvolution: () => void;
   clearMealHistory: () => void;
@@ -124,7 +130,7 @@ type GameStoreActions = {
         ok: true;
         xpDelta: number;
       };
-  syncMealStatus: (preserveEatingState?: boolean) => void;
+  syncMealStatus: (preserveEatingState?: boolean) => MealStatusSyncResult;
   toggleQuizDailyLimitEnabled: () => void;
   toggleMealRestrictionEnabled: () => void;
   toggleDeveloperModeEnabled: () => void;
@@ -267,6 +273,57 @@ export const useGameStore = create<GameStore>()(
             totalXp: nextTotalXp,
           };
         }),
+      addSkippedMealForTest: () => {
+        clearEatingTimeout();
+
+        set((state) => {
+          const latestCompletedMealSlotIndex =
+            getLatestCompletedMealSlotIndex();
+          const nextLastFedMealSlotIndex =
+            Math.min(
+              state.lastFedMealSlotIndex,
+              latestCompletedMealSlotIndex,
+            ) - 1;
+          const skippedMealCount = Math.max(
+            latestCompletedMealSlotIndex - nextLastFedMealSlotIndex,
+            0,
+          );
+          const totalSkippedMealPenaltyCount = Math.max(
+            skippedMealCount - HUNGRY_MEAL_SKIP_THRESHOLD,
+            0,
+          );
+          const nextPenaltyCount = Math.max(
+            totalSkippedMealPenaltyCount -
+              state.appliedSkippedMealPenaltyCount,
+            0,
+          );
+          const nextTotalXp =
+            nextPenaltyCount > 0
+              ? Math.max(
+                  state.totalXp - nextPenaltyCount * MEAL_SKIP_XP_PENALTY,
+                  0,
+                )
+              : state.totalXp;
+          const normalizedCharacterState = normalizeEvolutionResumeState(
+            state.characterState,
+          );
+          const nextCharacterState =
+            skippedMealCount >= HUNGRY_MEAL_SKIP_THRESHOLD
+              ? "hungry"
+              : normalizedCharacterState === "hungry" ||
+                  normalizedCharacterState === "eating"
+                ? DEFAULT_CHARACTER_STATE
+                : normalizedCharacterState;
+
+          return {
+            appliedSkippedMealPenaltyCount: totalSkippedMealPenaltyCount,
+            characterState: nextCharacterState,
+            lastFedMealSlotIndex: nextLastFedMealSlotIndex,
+            skippedMealCount,
+            totalXp: nextTotalXp,
+          };
+        });
+      },
       addFriend: (friend) =>
         set((state) => {
           if (state.friendList.some((item) => item.id === friend.id)) {
@@ -324,9 +381,10 @@ export const useGameStore = create<GameStore>()(
           totalSkippedMealPenaltyCount - appliedSkippedMealPenaltyCount,
           0,
         );
+        const xpPenalty = nextPenaltyCount * MEAL_SKIP_XP_PENALTY;
         const nextTotalXp =
           nextPenaltyCount > 0
-            ? Math.max(totalXp - nextPenaltyCount * MEAL_SKIP_XP_PENALTY, 0)
+            ? Math.max(totalXp - xpPenalty, 0)
             : totalXp;
         const shouldStayEating =
           preserveEatingState && characterState === "eating";
@@ -349,6 +407,11 @@ export const useGameStore = create<GameStore>()(
           skippedMealCount,
           totalXp: nextTotalXp,
         });
+
+        return {
+          skippedMealCount,
+          xpPenalty,
+        };
       },
       feedBoo: (mealCost, mealSectionId) => {
         const {
@@ -432,13 +495,16 @@ export const useGameStore = create<GameStore>()(
 
         if (
           quizDailyLimitEnabled &&
-          !isQuizAvailableByCooldown(quizId, quizAttemptHistory, attemptedAt)
+          !isQuizAvailableByCooldown(quizAttemptHistory, attemptedAt)
         ) {
           return {
             ok: false as const,
             reason: "cooldown" as const,
             nextAvailableAt:
-              getQuizCooldownEndAt(quizId, quizAttemptHistory)?.toISOString() ??
+              getQuizCooldownEndAt(
+                quizAttemptHistory,
+                attemptedAt,
+              )?.toISOString() ??
               null,
           };
         }

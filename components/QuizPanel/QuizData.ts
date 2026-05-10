@@ -433,31 +433,68 @@ export const getQuizDailyCountForDate = (
   return dailyCountDateKey === getQuizLocalDateKey(now) ? dailyCount : 0;
 };
 
-export const getQuizCooldownEndAt = (
-  quizId: string,
-  quizAttemptHistory: QuizAttemptHistory,
-) => {
-  const attemptedAtIso = quizAttemptHistory[quizId];
+const getNextQuizDailyResetAt = (date: Date) => {
+  const nextDate = new Date(date);
 
-  if (!attemptedAtIso) {
-    return null;
-  }
+  nextDate.setDate(nextDate.getDate() + 1);
+  nextDate.setHours(0, 0, 0, 0);
 
-  const attemptedAt = new Date(attemptedAtIso);
-
-  if (Number.isNaN(attemptedAt.getTime())) {
-    return null;
-  }
-
-  return new Date(attemptedAt.getTime() + QUIZ_COOLDOWN_MS);
+  return nextDate;
 };
 
-export const isQuizAvailableByCooldown = (
-  quizId: string,
+const getQuizAttemptDatesForDate = (
   quizAttemptHistory: QuizAttemptHistory,
   now = new Date(),
 ) => {
-  const cooldownEndAt = getQuizCooldownEndAt(quizId, quizAttemptHistory);
+  const todayKey = getQuizLocalDateKey(now);
+
+  return Object.values(quizAttemptHistory)
+    .map((attemptedAtIso) => new Date(attemptedAtIso))
+    .filter(
+      (attemptedAt) =>
+        !Number.isNaN(attemptedAt.getTime()) &&
+        getQuizLocalDateKey(attemptedAt) === todayKey,
+    )
+    .sort((a, b) => a.getTime() - b.getTime());
+};
+
+export const getLastQuizAttemptAtForDate = (
+  quizAttemptHistory: QuizAttemptHistory,
+  now = new Date(),
+) => {
+  const todayAttemptDates = getQuizAttemptDatesForDate(
+    quizAttemptHistory,
+    now,
+  );
+
+  return todayAttemptDates.length > 0
+    ? todayAttemptDates[todayAttemptDates.length - 1]
+    : null;
+};
+
+export const getQuizCooldownEndAt = (
+  quizAttemptHistory: QuizAttemptHistory,
+  now = new Date(),
+) => {
+  const lastAttemptAt = getLastQuizAttemptAtForDate(quizAttemptHistory, now);
+
+  if (!lastAttemptAt) {
+    return null;
+  }
+
+  const cooldownEndAt = new Date(lastAttemptAt.getTime() + QUIZ_COOLDOWN_MS);
+  const nextDailyResetAt = getNextQuizDailyResetAt(now);
+
+  return cooldownEndAt.getTime() < nextDailyResetAt.getTime()
+    ? cooldownEndAt
+    : nextDailyResetAt;
+};
+
+export const isQuizAvailableByCooldown = (
+  quizAttemptHistory: QuizAttemptHistory,
+  now = new Date(),
+) => {
+  const cooldownEndAt = getQuizCooldownEndAt(quizAttemptHistory, now);
 
   return !cooldownEndAt || cooldownEndAt.getTime() <= now.getTime();
 };
@@ -473,8 +510,25 @@ export const getAvailableQuizQuestions = (
     return QUIZ_QUESTIONS;
   }
 
+  if (!isQuizAvailableByCooldown(quizAttemptHistory, now)) {
+    return [];
+  }
+
+  const todayAttemptedQuizIds = new Set(
+    Object.entries(quizAttemptHistory)
+      .filter(([, attemptedAtIso]) => {
+        const attemptedAt = new Date(attemptedAtIso);
+
+        return (
+          !Number.isNaN(attemptedAt.getTime()) &&
+          getQuizLocalDateKey(attemptedAt) === getQuizLocalDateKey(now)
+        );
+      })
+      .map(([quizId]) => quizId),
+  );
+
   return QUIZ_QUESTIONS.filter((question) =>
-    isQuizAvailableByCooldown(question.id, quizAttemptHistory, now),
+    !todayAttemptedQuizIds.has(question.id),
   );
 };
 
@@ -492,15 +546,13 @@ export const getNextQuizAvailabilityTime = (
   quizAttemptHistory: QuizAttemptHistory,
   now = new Date(),
 ) => {
-  const futureDates = QUIZ_QUESTIONS.map((question) =>
-    getQuizCooldownEndAt(question.id, quizAttemptHistory),
-  ).filter((date): date is Date => !!date && date.getTime() > now.getTime());
+  const cooldownEndAt = getQuizCooldownEndAt(quizAttemptHistory, now);
 
-  if (futureDates.length === 0) {
+  if (!cooldownEndAt || cooldownEndAt.getTime() <= now.getTime()) {
     return null;
   }
 
-  return futureDates.sort((a, b) => a.getTime() - b.getTime())[0];
+  return cooldownEndAt;
 };
 
 export const getQuizAnswerLabel = (question: QuizQuestion) => {
