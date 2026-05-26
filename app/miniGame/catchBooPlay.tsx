@@ -683,7 +683,7 @@ const CatchBooPlayScreen = () => {
     <View style={styles.root} onLayout={handleGameAreaLayout}>
       <StatusBar hidden />
       <TopAlert
-        autoHideDuration={1600}
+        autoHideDuration={3000}
         closable={false}
         message="보상으로 코인이 추가되었어요."
         onClose={hideCoinRewardAlert}
