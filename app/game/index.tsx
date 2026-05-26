@@ -30,7 +30,7 @@ import {
   LOADING_OVERLAY_BACKGROUND_IMAGE,
   preloadLoadingOverlayAssets,
 } from "@/components/LoadingOverlay/LoadingOverlayAssets";
-import { preloadMiniGamePlaceImageAssets } from "@/components/MiniGame/MiniGameData";
+import { preloadMiniGamePlaceCriticalImageAssets } from "@/components/MiniGame/MiniGameData";
 import {
   formatMealCountdown,
   getMealAvailabilityStatus,
@@ -97,7 +97,7 @@ import {
 const CHARACTER_SIZE = 319;
 const BIG_BUTTON_HEIGHT = 76;
 const BOO_CHAT_DURATION_MS = 2000;
-const CUSTOM_LOADING_MIN_DURATION_MS = 2000;
+const CUSTOM_LOADING_MIN_DURATION_MS = 800;
 const PROGRESS_BAR_GAP = 22;
 const AUTO_BOO_CHAT_INTERVAL_MS = 6000;
 const MEAL_STATUS_SYNC_INTERVAL_MS = 30000;
@@ -113,7 +113,7 @@ const EVOLUTION_POST_SUCCESS_SETTLE_MS = Math.max(
   EVOLUTION_ALERT_SUCCESS_MS,
   EVOLUTION_CONGRAT_SOUND_DURATION_MS - EVOLUTION_CONGRAT_SOUND_EARLY_MS,
 );
-const GAME_IMAGE_ASSETS = [
+const GAME_DEFERRED_IMAGE_ASSETS = [
   require("../../assets/images/big-smoke.png"),
   ...Object.values(CHARACTER_IMAGES.grades).flatMap((gradeImages) =>
     Object.values(gradeImages),
@@ -124,23 +124,59 @@ const GAME_IMAGE_ASSETS = [
   ...TUTORIAL_IMAGE_ASSETS,
 ] as PreloadableImageAsset[];
 
-let hasPreloadedGameImageAssets = false;
-let gameImageAssetsPreloadPromise: Promise<void> | null = null;
+let hasPreloadedGameCriticalImageAssets = false;
+let gameCriticalImageAssetsPreloadPromise: Promise<void> | null = null;
+let hasPreloadedGameDeferredImageAssets = false;
+let gameDeferredImageAssetsPreloadPromise: Promise<void> | null = null;
 
-const preloadGameImageAssets = () => {
-  if (hasPreloadedGameImageAssets) {
+const getGameCriticalImageAssets = (
+  grade: keyof typeof CHARACTER_IMAGES.grades,
+  characterState: CharacterState,
+) => {
+  const gradeImages = CHARACTER_IMAGES.grades[grade];
+
+  return [
+    gradeImages[characterState] ?? gradeImages.basic1,
+  ] as PreloadableImageAsset[];
+};
+
+const preloadGameCriticalImageAssets = (
+  grade: keyof typeof CHARACTER_IMAGES.grades,
+  characterState: CharacterState,
+) => {
+  if (hasPreloadedGameCriticalImageAssets) {
     return Promise.resolve();
   }
 
-  if (!gameImageAssetsPreloadPromise) {
-    gameImageAssetsPreloadPromise = preloadImageAssets(GAME_IMAGE_ASSETS)
+  if (!gameCriticalImageAssetsPreloadPromise) {
+    gameCriticalImageAssetsPreloadPromise = preloadImageAssets(
+      getGameCriticalImageAssets(grade, characterState),
+    )
       .catch(() => undefined)
       .then(() => {
-        hasPreloadedGameImageAssets = true;
+        hasPreloadedGameCriticalImageAssets = true;
       });
   }
 
-  return gameImageAssetsPreloadPromise;
+  return gameCriticalImageAssetsPreloadPromise;
+};
+
+const preloadGameDeferredImageAssets = () => {
+  if (hasPreloadedGameDeferredImageAssets) {
+    return Promise.resolve();
+  }
+
+  if (!gameDeferredImageAssetsPreloadPromise) {
+    gameDeferredImageAssetsPreloadPromise = preloadImageAssets(
+      GAME_DEFERRED_IMAGE_ASSETS,
+    )
+      .catch(() => undefined)
+      .then(() => {
+        hasPreloadedGameDeferredImageAssets = true;
+      });
+  }
+
+  return gameDeferredImageAssetsPreloadPromise;
 };
 
 const resolvePostEvolutionCharacterState = (
@@ -189,7 +225,9 @@ export default function Index() {
   const isAnyOverlayOpenRef = useRef(false);
   const isEvolutionBusyRef = useRef(false);
   const hasCheckedTutorialPromptRef = useRef(false);
-  const shouldUseMinimumGameLoadingRef = useRef(!hasPreloadedGameImageAssets);
+  const shouldUseMinimumGameLoadingRef = useRef(
+    !hasPreloadedGameCriticalImageAssets,
+  );
   const todayMealSectionsRef = useRef<TodayMealSection[]>([]);
   const [isOptionOpen, setIsOptionOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
@@ -202,10 +240,10 @@ export default function Index() {
   const [isDeveloperPanelOpen, setIsDeveloperPanelOpen] = useState(false);
   const [isMiniGameLoading, setIsMiniGameLoading] = useState(false);
   const [isBackgroundReady, setIsBackgroundReady] = useState(
-    hasPreloadedGameImageAssets,
+    hasPreloadedGameCriticalImageAssets,
   );
   const [areGameAssetsLoaded, setAreGameAssetsLoaded] = useState(
-    hasPreloadedGameImageAssets,
+    hasPreloadedGameCriticalImageAssets,
   );
   const [isMinimumLoadingElapsed, setIsMinimumLoadingElapsed] = useState(
     !shouldUseMinimumGameLoadingRef.current,
@@ -213,7 +251,7 @@ export default function Index() {
   const [booChatMessage, setBooChatMessage] = useState("");
   const [isBooChatVisible, setIsBooChatVisible] = useState(false);
   const [isCharacterReady, setIsCharacterReady] = useState(
-    hasPreloadedGameImageAssets,
+    hasPreloadedGameCriticalImageAssets,
   );
   const [activeEvolution, setActiveEvolution] =
     useState<PendingEvolution | null>(null);
@@ -342,12 +380,14 @@ export default function Index() {
     const preloadGameAssets = async () => {
       await Promise.all([
         preloadLoadingOverlayAssets(),
-        preloadGameImageAssets(),
+        preloadGameCriticalImageAssets(displayedGrade, characterState),
       ]);
 
       if (isMounted) {
         setAreGameAssetsLoaded(true);
       }
+
+      void preloadGameDeferredImageAssets();
     };
 
     void preloadGameAssets();
@@ -355,7 +395,7 @@ export default function Index() {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [characterState, displayedGrade]);
 
   useEffect(() => {
     if (!shouldUseMinimumGameLoadingRef.current) {
@@ -636,7 +676,7 @@ export default function Index() {
     closeAllPanelsToMain();
     setIsMiniGameLoading(true);
 
-    void preloadMiniGamePlaceImageAssets()
+    void preloadMiniGamePlaceCriticalImageAssets()
       .then(() => {
         router.replace("/miniGame");
       })

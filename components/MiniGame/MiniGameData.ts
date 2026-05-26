@@ -1,10 +1,13 @@
 /**
  * @description  미니게임 장소/시작 화면 이미지, 라벨, 설명, 하트 더미 상태와 preload를 관리합니다.
- * @depends      assets/places/*, assets/miniGame/icons/*, expo-image, react-native
+ * @depends      assets/places/*, assets/miniGame/icons/*, assets/miniGame/book-catch/*, assets/miniGame/boo-catch/*, react-native, utils/preloadImageAssets.ts
  * @used-by      app/game/index.tsx, app/miniGame/index.tsx, components/MiniGame/MiniGameStartScreen.tsx
  * @side-effects preloadMiniGamePlaceImageAssets 호출 시 이미지 캐시 preload
  */
-import { Image as ExpoImage } from "expo-image";
+import {
+  preloadImageAssets,
+  type PreloadableImageAsset,
+} from "@/utils/preloadImageAssets";
 import type { ImageSourcePropType } from "react-native";
 
 const LIBRARY_PLACE_IMAGE = require("@/assets/places/library.png");
@@ -25,6 +28,10 @@ const BOOK_CATCH_RULE_COMIC_IMAGE = require("@/assets/miniGame/book-catch/comic.
 const BOOK_CATCH_RULE_PHONE_IMAGE = require("@/assets/miniGame/book-catch/phone.png");
 const BOOK_CATCH_RULE_GAME_MACHINE_IMAGE = require("@/assets/miniGame/book-catch/game-machine.png");
 const BOOK_CATCH_LIBRARY_BACKGROUND_IMAGE = require("@/assets/miniGame/book-catch/library-background.png");
+const BOO_CATCH_RULE_BASIC_IMAGE = require("@/assets/miniGame/boo-catch/boo-basic.png");
+const BOO_CATCH_RULE_GOLD_IMAGE = require("@/assets/miniGame/boo-catch/boo-gold.png");
+const BOO_CATCH_RULE_PENGUIN_IMAGE = require("@/assets/miniGame/boo-catch/boo-penguin.png");
+const BOO_CATCH_RULE_PIGEON_IMAGE = require("@/assets/miniGame/boo-catch/boo-pigeon.png");
 
 export type MiniGameId = "catchTheMajor" | "catchBoo" | "freeThrow";
 export type MiniGameRoutePath =
@@ -282,16 +289,52 @@ export const MINI_GAME_BOOK_CATCH_PLAY_IMAGE_ASSETS = [
   BOOK_CATCH_LIBRARY_BACKGROUND_IMAGE,
 ];
 
+export const MINI_GAME_BOO_CATCH_RULE_IMAGE_ASSETS = [
+  BOO_CATCH_RULE_BASIC_IMAGE,
+  BOO_CATCH_RULE_GOLD_IMAGE,
+  BOO_CATCH_RULE_PENGUIN_IMAGE,
+  BOO_CATCH_RULE_PIGEON_IMAGE,
+];
+
 export const MINI_GAME_PLACE_IMAGE_ASSETS = [
   ...MINI_GAME_PLACE_OPTIONS.map((place) => place.image),
   ...MINI_GAME_START_SCREEN_ICON_ASSETS,
   ...MINI_GAME_BOOK_CATCH_PLAY_IMAGE_ASSETS,
-];
+  ...MINI_GAME_BOO_CATCH_RULE_IMAGE_ASSETS,
+] as PreloadableImageAsset[];
+
+export const MINI_GAME_PLACE_CRITICAL_IMAGE_ASSETS = [
+  MINI_GAME_PLACE_OPTIONS[0].image,
+] as PreloadableImageAsset[];
+
+export const MINI_GAME_PLACE_DEFERRED_IMAGE_ASSETS = MINI_GAME_PLACE_IMAGE_ASSETS;
 
 let hasPreloadedMiniGamePlaceImageAssets = false;
 let miniGamePlaceImageAssetsPreloadPromise: Promise<void> | null = null;
+let hasPreloadedMiniGamePlaceCriticalImageAssets = false;
+let miniGamePlaceCriticalImageAssetsPreloadPromise: Promise<void> | null = null;
 let hasPreloadedMiniGameBookCatchImageAssets = false;
 let miniGameBookCatchImageAssetsPreloadPromise: Promise<void> | null = null;
+let hasPreloadedMiniGameBooCatchRuleImageAssets = false;
+let miniGameBooCatchRuleImageAssetsPreloadPromise: Promise<void> | null = null;
+
+export const preloadMiniGamePlaceCriticalImageAssets = () => {
+  if (hasPreloadedMiniGamePlaceCriticalImageAssets) {
+    return Promise.resolve();
+  }
+
+  if (!miniGamePlaceCriticalImageAssetsPreloadPromise) {
+    miniGamePlaceCriticalImageAssetsPreloadPromise = preloadImageAssets(
+      MINI_GAME_PLACE_CRITICAL_IMAGE_ASSETS,
+    )
+      .catch(() => undefined)
+      .then(() => {
+        hasPreloadedMiniGamePlaceCriticalImageAssets = true;
+      });
+  }
+
+  return miniGamePlaceCriticalImageAssetsPreloadPromise;
+};
 
 export const preloadMiniGameBookCatchImageAssets = () => {
   if (hasPreloadedMiniGameBookCatchImageAssets) {
@@ -299,10 +342,8 @@ export const preloadMiniGameBookCatchImageAssets = () => {
   }
 
   if (!miniGameBookCatchImageAssetsPreloadPromise) {
-    miniGameBookCatchImageAssetsPreloadPromise = Promise.all(
-      MINI_GAME_BOOK_CATCH_PLAY_IMAGE_ASSETS.map((source) =>
-        ExpoImage.loadAsync(source),
-      ),
+    miniGameBookCatchImageAssetsPreloadPromise = preloadImageAssets(
+      MINI_GAME_BOOK_CATCH_PLAY_IMAGE_ASSETS,
     )
       .catch(() => undefined)
       .then(() => {
@@ -313,19 +354,39 @@ export const preloadMiniGameBookCatchImageAssets = () => {
   return miniGameBookCatchImageAssetsPreloadPromise;
 };
 
+export const preloadMiniGameBooCatchRuleImageAssets = () => {
+  if (hasPreloadedMiniGameBooCatchRuleImageAssets) {
+    return Promise.resolve();
+  }
+
+  if (!miniGameBooCatchRuleImageAssetsPreloadPromise) {
+    miniGameBooCatchRuleImageAssetsPreloadPromise = preloadImageAssets(
+      MINI_GAME_BOO_CATCH_RULE_IMAGE_ASSETS,
+    )
+      .catch(() => undefined)
+      .then(() => {
+        hasPreloadedMiniGameBooCatchRuleImageAssets = true;
+      });
+  }
+
+  return miniGameBooCatchRuleImageAssetsPreloadPromise;
+};
+
 export const preloadMiniGamePlaceImageAssets = () => {
   if (hasPreloadedMiniGamePlaceImageAssets) {
     return Promise.resolve();
   }
 
   if (!miniGamePlaceImageAssetsPreloadPromise) {
-    miniGamePlaceImageAssetsPreloadPromise = Promise.all(
-      MINI_GAME_PLACE_IMAGE_ASSETS.map((source) => ExpoImage.loadAsync(source)),
+    miniGamePlaceImageAssetsPreloadPromise = preloadImageAssets(
+      MINI_GAME_PLACE_DEFERRED_IMAGE_ASSETS,
     )
       .catch(() => undefined)
       .then(() => {
         hasPreloadedMiniGamePlaceImageAssets = true;
+        hasPreloadedMiniGamePlaceCriticalImageAssets = true;
         hasPreloadedMiniGameBookCatchImageAssets = true;
+        hasPreloadedMiniGameBooCatchRuleImageAssets = true;
       });
   }
 

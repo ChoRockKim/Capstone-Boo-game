@@ -11,6 +11,7 @@ import user from "@/assets/icons/users-multiple.svg";
 import CoinBox from "@/components/CoinBox/CoinBox";
 import FriendList from "@/components/FriendList/FriendList";
 import FriendPanel from "@/components/FriendPanel/FriendPanel";
+import LoadingOverlay from "@/components/LoadingOverlay/LoadingOverlay";
 import MainButton from "@/components/MainButton/MainButton";
 import {
   MINI_GAME_PLACE_OPTIONS,
@@ -63,6 +64,9 @@ export default function MiniGameIndex() {
   const [isSoundSettingsOpen, setIsSoundSettingsOpen] = useState(false);
   const [isPlaceInfoOpen, setIsPlaceInfoOpen] = useState(false);
   const [selectedPlaceIndex, setSelectedPlaceIndex] = useState(0);
+  const [displayedPlaceIds, setDisplayedPlaceIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [topAlert, setTopAlert] = useState<TopAlertState>({
     autoHideDuration: 1800,
     id: 0,
@@ -75,6 +79,7 @@ export default function MiniGameIndex() {
   const coin = useGameStore((state) => state.coin);
   const totalXp = useGameStore((state) => state.totalXp);
   const selectedPlace = MINI_GAME_PLACE_OPTIONS[selectedPlaceIndex];
+  const isSelectedPlaceImageReady = displayedPlaceIds.has(selectedPlace.id);
   const xpProgress = useMemo(() => getXpProgressInfo(totalXp), [totalXp]);
   const progressBarTopOffset = insets.top + 86;
 
@@ -86,6 +91,18 @@ export default function MiniGameIndex() {
 
   useEffect(() => {
     void preloadMiniGamePlaceImageAssets();
+  }, []);
+
+  const markPlaceImageReady = useCallback((placeId: string) => {
+    setDisplayedPlaceIds((currentIds) => {
+      if (currentIds.has(placeId)) {
+        return currentIds;
+      }
+
+      const nextIds = new Set(currentIds);
+      nextIds.add(placeId);
+      return nextIds;
+    });
   }, []);
 
   const closeSubPanels = () => {
@@ -173,6 +190,8 @@ export default function MiniGameIndex() {
             key={place.id}
             cachePolicy="memory-disk"
             contentFit="cover"
+            onDisplay={() => markPlaceImageReady(place.id)}
+            onError={() => markPlaceImageReady(place.id)}
             source={place.image}
             style={[
               styles.backgroundImage,
@@ -329,6 +348,7 @@ export default function MiniGameIndex() {
           setIsSoundSettingsOpen={setIsSoundSettingsOpen}
         />
       ) : null}
+      {!isSelectedPlaceImageReady ? <LoadingOverlay /> : null}
     </View>
   );
 }

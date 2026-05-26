@@ -175,6 +175,8 @@
 - `app/miniGame/catchTheMajorPlay.tsx`는 Reanimated shared value, frame callback, collision 판정, 하트/랭킹 UI를 한 화면에서 조율합니다. 수정 시 animation cleanup, `useFocusEffect` BGM 세션, router 이동을 함께 확인해야 합니다.
 - 로딩 오버레이 이미지 source와 preload는 `components/LoadingOverlay/LoadingOverlayAssets.ts`만 진실로 둡니다. 로딩 화면 배경/알 이미지를 다른 파일에서 새로 `require(...)`하지 말고 해당 registry를 import하세요.
 - `app/_layout.tsx`는 SplashScreen을 닫기 전에 `preloadLoadingOverlayAssets()`를 await합니다. 로딩창이 필요한 새 화면을 추가해도 로딩 오버레이 자체 이미지는 앱 시작 시 준비되어 있어야 합니다.
+- `app/game/index.tsx`의 로그인 후 초기 진입은 critical asset만 await합니다. 현재 부 이미지 등 첫 화면에 필요한 최소 에셋은 `preloadGameCriticalImageAssets`, 캐릭터 전체/학식/마이룸/튜토리얼 이미지는 `preloadGameDeferredImageAssets`에서 background preload합니다.
+- 메인에서 `/miniGame`으로 이동할 때는 `preloadMiniGamePlaceCriticalImageAssets`로 첫 장소 배경만 await합니다. 나머지 장소/시작화면/플레이 이미지는 `app/miniGame/index.tsx` mount 이후 `preloadMiniGamePlaceImageAssets`로 background preload합니다.
 - 새 이미지 preload가 필요하면 가능하면 `utils/preloadImageAssets.ts`를 사용해 `expo-asset`과 `expo-image` 캐시를 함께 올리세요.
 - `components/Room/RoomData.ts`의 가구 위치는 room 이미지 기준 좌표(`ROOM_CANVAS_WIDTH`, `ROOM_CANVAS_HEIGHT`)로 계산됩니다.
 - `node_modules`에 ` 2`, ` 3`이 붙은 복제 패키지가 생기면 Metro가 `Bundler cache is empty` 단계에서 멈출 수 있습니다. 이 경우 `node_modules`와 `.expo/cache`를 삭제하고 Node 20에서 `npm install`을 다시 실행하세요.

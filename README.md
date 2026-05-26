@@ -71,6 +71,8 @@ npm run lint
 - `LoadingOverlay` 자체도 방어적으로 같은 preload 함수를 호출합니다.
 - 새 로딩 오버레이 이미지는 `LoadingOverlayAssets.ts`에 추가하세요.
 - 일반 이미지 preload는 `utils/preloadImageAssets.ts`를 사용해 `expo-asset`과 `expo-image` 캐시에 함께 올립니다.
+- 로그인 후 메인 화면 진입 시에는 현재 부 이미지 같은 critical asset만 await하고, 캐릭터 전체/학식/마이룸/튜토리얼 이미지는 화면 표시 이후 background preload합니다.
+- 메인에서 미니게임 장소 선택 화면으로 이동할 때는 첫 장소 배경만 critical asset으로 await하고, 나머지 장소/시작화면/플레이 이미지는 장소 선택 화면 표시 이후 background preload합니다.
 
 ## Project Structure
 

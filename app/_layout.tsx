@@ -111,6 +111,10 @@ export default function RootLayout() {
             options={{ gestureEnabled: false }}
           />
           <Stack.Screen name="miniGame/catchBoo" />
+          <Stack.Screen
+            name="miniGame/catchBooPlay"
+            options={{ gestureEnabled: false }}
+          />
           <Stack.Screen name="miniGame/freeThrow" />
         </Stack>
       </SafeAreaProvider>

@@ -8,6 +8,7 @@ import ArrowBackIcon from "@/assets/icons/arrow-back-return.svg";
 import TrophyIcon from "@/assets/icons/trophy.svg";
 import CoinBox from "@/components/CoinBox/CoinBox";
 import BookCatchRuleModal from "@/components/MiniGame/BookCatchRuleModal";
+import BooCatchRuleModal from "@/components/MiniGame/BooCatchRuleModal";
 import { getFriendMiniGameScore } from "@/components/FriendList/FriendListDummyData";
 import MainButton from "@/components/MainButton/MainButton";
 import HeartCountBadge from "@/components/MiniGame/HeartCountBadge";
@@ -15,6 +16,7 @@ import {
   formatMiniGameHeartCountdown,
   getMiniGameHeartStatus,
   MINI_GAME_START_SCREEN_REGISTRY,
+  preloadMiniGameBooCatchRuleImageAssets,
 } from "@/components/MiniGame/MiniGameData";
 import type { MiniGameId } from "@/components/MiniGame/MiniGameData";
 import MiniGameRankingModal, {
@@ -92,6 +94,7 @@ const MiniGameStartScreen = ({ miniGameId }: MiniGameStartScreenProps) => {
   const heartStatusLabel = heartStatus.isFull
     ? "가득 참"
     : formatMiniGameHeartCountdown(heartStatus.nextHeartRecoveryRemainingMs);
+  const supportsInfiniteMode = miniGame.id === "catchTheMajor";
 
   useFocusEffect(
     useCallback(() => {
@@ -112,6 +115,14 @@ const MiniGameStartScreen = ({ miniGameId }: MiniGameStartScreenProps) => {
       clearInterval(timer);
     };
   }, [heartStatus.isFull]);
+
+  useEffect(() => {
+    if (miniGame.id !== "catchBoo") {
+      return;
+    }
+
+    void preloadMiniGameBooCatchRuleImageAssets();
+  }, [miniGame.id]);
 
   const showTopAlert = useCallback(
     (
@@ -149,12 +160,15 @@ const MiniGameStartScreen = ({ miniGameId }: MiniGameStartScreenProps) => {
   };
 
   const handleRulePress = () => {
-    if (miniGame.id !== "catchTheMajor") {
+    if (miniGame.id !== "catchTheMajor" && miniGame.id !== "catchBoo") {
       showReadyAlert();
       return;
     }
 
     setIsRankingOpen(false);
+    if (miniGame.id === "catchBoo") {
+      void preloadMiniGameBooCatchRuleImageAssets();
+    }
     setIsRuleOpen(true);
   };
 
@@ -163,6 +177,13 @@ const MiniGameStartScreen = ({ miniGameId }: MiniGameStartScreenProps) => {
   };
 
   const handleGameStartPress = () => {
+    if (miniGame.id === "catchBoo") {
+      setIsRankingOpen(false);
+      setIsRuleOpen(false);
+      router.push("/miniGame/catchBooPlay");
+      return;
+    }
+
     if (miniGame.id !== "catchTheMajor") {
       showReadyAlert();
       return;
@@ -237,36 +258,38 @@ const MiniGameStartScreen = ({ miniGameId }: MiniGameStartScreenProps) => {
             />
           </View>
           <View style={styles.startActionColumn}>
-            <Pressable
-              onPress={handleInfiniteModePress}
-              style={({ pressed }) => [
-                styles.infiniteModeToggle,
-                { width: actionButtonWidth },
-                pressed && styles.infiniteModeTogglePressed,
-              ]}
-            >
-              <OutlinedText
-                color={colors.BLACK_NORMAL}
-                outlineColor={colors.WHITE_NORMAL}
-                outlineWidth={1}
-                style={styles.infiniteModeToggleText}
-              >
-                무한모드
-              </OutlinedText>
-              <View
-                style={[
-                  styles.infiniteModeCheckBox,
-                  isInfiniteMode && styles.infiniteModeCheckBoxActive,
+            {supportsInfiniteMode ? (
+              <Pressable
+                onPress={handleInfiniteModePress}
+                style={({ pressed }) => [
+                  styles.infiniteModeToggle,
+                  { width: actionButtonWidth },
+                  pressed && styles.infiniteModeTogglePressed,
                 ]}
               >
-                {isInfiniteMode ? (
-                  <>
-                    <View style={styles.infiniteModeCheckMarkShort} />
-                    <View style={styles.infiniteModeCheckMarkLong} />
-                  </>
-                ) : null}
-              </View>
-            </Pressable>
+                <OutlinedText
+                  color={colors.BLACK_NORMAL}
+                  outlineColor={colors.WHITE_NORMAL}
+                  outlineWidth={1}
+                  style={styles.infiniteModeToggleText}
+                >
+                  무한모드
+                </OutlinedText>
+                <View
+                  style={[
+                    styles.infiniteModeCheckBox,
+                    isInfiniteMode && styles.infiniteModeCheckBoxActive,
+                  ]}
+                >
+                  {isInfiniteMode ? (
+                    <>
+                      <View style={styles.infiniteModeCheckMarkShort} />
+                      <View style={styles.infiniteModeCheckMarkLong} />
+                    </>
+                  ) : null}
+                </View>
+              </Pressable>
+            ) : null}
             <View style={styles.mainButtonShadow}>
               <MainButton
                 height={76}
@@ -286,8 +309,11 @@ const MiniGameStartScreen = ({ miniGameId }: MiniGameStartScreenProps) => {
           title={isInfiniteMode ? "무한 랭킹" : "랭킹"}
         />
       ) : null}
-      {isRuleOpen ? (
+      {isRuleOpen && miniGame.id === "catchTheMajor" ? (
         <BookCatchRuleModal onClose={() => setIsRuleOpen(false)} />
+      ) : null}
+      {isRuleOpen && miniGame.id === "catchBoo" ? (
+        <BooCatchRuleModal onClose={() => setIsRuleOpen(false)} />
       ) : null}
     </View>
   );
