@@ -1,3 +1,9 @@
+/**
+ * @description  부의 자동/터치/방/퀴즈/진화 말풍선 문구와 랜덤 선택 함수를 관리합니다.
+ * @depends      constants/character.ts
+ * @used-by      app/game/index.tsx, components/Room/RoomMiniBoo.tsx
+ * @side-effects Math.random 기반 문구 선택
+ */
 import { CharacterGrade, CharacterState } from "@/constants/character";
 
 export type BooChatCategory =

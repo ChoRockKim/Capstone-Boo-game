@@ -1,7 +1,15 @@
+/**
+ * @description  화면별 BGM player 생성, preload, 세션 전환, pause/resume, 볼륨을 관리합니다.
+ * @depends      assets/musics/bgm/*
+ * @used-by      app/_layout.tsx, app/index.tsx, app/game/index.tsx, app/room/index.tsx, app/miniGame/index.tsx
+ * @side-effects expo-audio player 생성/재생/정지, retry timer 관리
+ */
 import { createAudioPlayer, type AudioPlayer } from "expo-audio";
 
 const BACKGROUND_MUSIC_SOURCES = {
   main: require("@/assets/musics/bgm/main-ui.mp3"),
+  miniGameMain: require("@/assets/musics/bgm/minigame-main.mp3"),
+  miniGameIngame: require("@/assets/musics/bgm/minigame-ingame.mp3"),
   myRoom: require("@/assets/musics/bgm/my-room.mp3"),
   titleLogin: require("@/assets/musics/bgm/title-login.mp3"),
 } as const;
@@ -9,9 +17,11 @@ const BACKGROUND_MUSIC_SOURCES = {
 export type BackgroundMusicTrack = keyof typeof BACKGROUND_MUSIC_SOURCES;
 
 const BACKGROUND_MUSIC_RETRY_DELAY_MS = 500;
-const DEFAULT_BACKGROUND_MUSIC_VOLUME = 0.2;
+const DEFAULT_BACKGROUND_MUSIC_VOLUME = 0.14;
 const BACKGROUND_MUSIC_VOLUME_SCALE: Record<BackgroundMusicTrack, number> = {
   main: 1,
+  miniGameMain: 1,
+  miniGameIngame: 1,
   myRoom: 1.6,
   titleLogin: 1,
 };

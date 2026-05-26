@@ -1,3 +1,9 @@
+/**
+ * @description  개발/시연용으로 XP, 코인, 식사, 퀴즈, 튜토리얼, 캐릭터 상태를 조작하는 패널입니다.
+ * @depends      stores/useGameStore.ts, components/MainButton/MainButton.tsx, components/MealPanel/MealMenuData.ts, constants/character.ts, utils/xpProgress.ts
+ * @used-by      app/game/index.tsx
+ * @side-effects 다수의 Zustand 디버그 액션 호출, 입력 validation 상태 관리
+ */
 import CrossIcon from "@/assets/icons/cross.svg";
 import MainButton from "@/components/MainButton/MainButton";
 import { MealDayMode } from "@/components/MealPanel/MealMenuData";
@@ -425,6 +431,10 @@ const DeveloperPanel = ({
 
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>학년</Text>
+            <View style={styles.metricCard}>
+              <Text style={styles.metricLabel}>현재 학년</Text>
+              <Text style={styles.metricValue}>{xpProgress.grade}학년</Text>
+            </View>
             <View style={styles.chipRow}>
               {GRADE_OPTIONS.map((gradeOption) => (
                 <DeveloperChipButton
@@ -619,7 +629,7 @@ const DeveloperPanel = ({
 
 const styles = StyleSheet.create({
   root: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     zIndex: 999,
     elevation: 999,
     justifyContent: "flex-end",

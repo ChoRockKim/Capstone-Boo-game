@@ -1,3 +1,9 @@
+/**
+ * @description  버튼/캐릭터/퀴즈/진화 효과음 player 생성, preload, 재생, 볼륨을 관리합니다.
+ * @depends      assets/musics/sfx/*
+ * @used-by      app/_layout.tsx, app/game/index.tsx, app/room/index.tsx, components/* 버튼/패널
+ * @side-effects expo-audio player 생성/seek/play, SFX 볼륨 상태 변경
+ */
 import { createAudioPlayer, type AudioPlayer } from "expo-audio";
 
 const SOUND_EFFECT_SOURCES = {
@@ -6,6 +12,7 @@ const SOUND_EFFECT_SOURCES = {
   congratulation: require("@/assets/musics/sfx/congratulation.mp3"),
   eating: require("@/assets/musics/sfx/eating.mp3"),
   evolution: require("@/assets/musics/sfx/evolution.mp3"),
+  pointPlus: require("@/assets/musics/sfx/point-plus.mp3"),
   quizO: require("@/assets/musics/sfx/quiz-o.mp3"),
   quizX: require("@/assets/musics/sfx/quiz-x.mp3"),
 } as const;

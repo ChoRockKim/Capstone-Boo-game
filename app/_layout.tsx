@@ -1,36 +1,42 @@
+/**
+ * @description  앱 공통 초기화, Provider, Splash 제어, 폰트/이미지/사운드 preload를 담당합니다.
+ * @depends      stores/useGameStore.ts, utils/backgroundMusic.ts, utils/soundEffects.ts
+ * @used-by      expo-router/entry
+ * @side-effects SplashScreen 제어, 이미지/폰트/오디오 preload, Android navigation bar 설정
+ */
+import { preloadLoadingOverlayAssets } from "@/components/LoadingOverlay/LoadingOverlayAssets";
 import { useGameStore } from "@/stores/useGameStore";
 import {
   preloadBackgroundMusicTracks,
   setBackgroundMusicVolume,
 } from "@/utils/backgroundMusic";
+import { preloadImageAssets } from "@/utils/preloadImageAssets";
 import {
   preloadSoundEffects,
   setSoundEffectsVolume,
 } from "@/utils/soundEffects";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useFonts } from "expo-font";
-import { Image as ExpoImage } from "expo-image";
-import { requireOptionalNativeModule } from "expo-modules-core";
+import { NavigationBar } from "expo-navigation-bar";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { useEffect, useState } from "react";
-import { Platform } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 SplashScreen.preventAutoHideAsync();
 
-const REQUIRED_IMAGE_ASSETS = [
+const LOGIN_IMAGE_ASSETS = [
   require("../assets/images/main-building.png"),
   require("../assets/images/main-title.png"),
-  require("../assets/images/inGameMain.png"),
-  require("../assets/images/egg-closed.png"),
-  require("../assets/images/egg-opened.png"),
 ];
 
-type ExpoNavigationBarModule = {
-  setBehaviorAsync: (behavior: "overlay-swipe") => Promise<void>;
-  setVisibilityAsync: (visibility: "hidden") => Promise<void>;
+const preloadRequiredImageAssets = async () => {
+  await Promise.all([
+    preloadImageAssets(LOGIN_IMAGE_ASSETS),
+    preloadLoadingOverlayAssets(),
+  ]);
 };
+
 
 export default function RootLayout() {
   const [assetsLoaded, setAssetsLoaded] = useState(false);
@@ -56,14 +62,10 @@ export default function RootLayout() {
     let isMounted = true;
 
     const preloadAssets = async () => {
-      try {
-        await Promise.all(
-          REQUIRED_IMAGE_ASSETS.map((source) => ExpoImage.loadAsync(source)),
-        );
-      } finally {
-        if (isMounted) {
-          setAssetsLoaded(true);
-        }
+      await preloadRequiredImageAssets();
+
+      if (isMounted) {
+        setAssetsLoaded(true);
       }
     };
 
@@ -74,34 +76,6 @@ export default function RootLayout() {
     };
   }, []);
 
-  useEffect(() => {
-    if (Platform.OS !== "android") {
-      return;
-    }
-
-    const configureAndroidNavigationBar = async () => {
-      const navigationBarModule =
-        requireOptionalNativeModule<ExpoNavigationBarModule>(
-          "ExpoNavigationBar",
-        );
-
-      if (!navigationBarModule) {
-        console.warn(
-          "ExpoNavigationBar is unavailable in this Android build. Rebuild the app to enable hidden navigation mode.",
-        );
-        return;
-      }
-
-      try {
-        await navigationBarModule.setVisibilityAsync("hidden");
-        await navigationBarModule.setBehaviorAsync("overlay-swipe");
-      } catch (error) {
-        console.warn("Failed to configure the Android navigation bar.", error);
-      }
-    };
-
-    void configureAndroidNavigationBar();
-  }, []);
 
   useEffect(() => {
     if (loaded && assetsLoaded) {
@@ -124,10 +98,20 @@ export default function RootLayout() {
   return (
     <QueryClientProvider client={queryClient}>
       <SafeAreaProvider>
+        <NavigationBar hidden />
         <Stack screenOptions={{ headerShown: false }}>
           <Stack.Screen name="index" />
           <Stack.Screen name="game/index" />
           <Stack.Screen name="room/index" />
+          <Stack.Screen name="room/[friendId]" />
+          <Stack.Screen name="miniGame/index" />
+          <Stack.Screen name="miniGame/catchTheMajor" />
+          <Stack.Screen
+            name="miniGame/catchTheMajorPlay"
+            options={{ gestureEnabled: false }}
+          />
+          <Stack.Screen name="miniGame/catchBoo" />
+          <Stack.Screen name="miniGame/freeThrow" />
         </Stack>
       </SafeAreaProvider>
     </QueryClientProvider>

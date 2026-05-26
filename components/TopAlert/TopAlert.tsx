@@ -1,3 +1,9 @@
+/**
+ * @description  화면 최상단에서 내려오는 공통 알림 UI와 자동 닫힘 애니메이션을 처리합니다.
+ * @depends      assets/icons/cross.svg, constants/colors.ts, constants/fonts.ts, utils/soundEffects.ts
+ * @used-by      app/game/index.tsx
+ * @side-effects Animated timing/spring, auto-hide timeout, close SFX 재생
+ */
 import CrossIcon from "@/assets/icons/cross.svg";
 import { colors } from "@/constants/colors";
 import { fonts } from "@/constants/fonts";
@@ -25,6 +31,16 @@ interface TopAlertProps {
 
 const HIDDEN_TRANSLATE_Y = -220;
 const TOP_ALERT_OVERSCAN = 24;
+const topAlertShadow = {
+  elevation: 3,
+  shadowColor: colors.NAVY_NORMAL,
+  shadowOffset: {
+    width: 2,
+    height: 2,
+  },
+  shadowOpacity: 0.25,
+  shadowRadius: 2,
+};
 
 function TopAlert({
   autoHideDuration = 2500,
@@ -148,7 +164,7 @@ function TopAlert({
 
 const styles = StyleSheet.create({
   root: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     zIndex: 2000,
     elevation: 2000,
     justifyContent: "flex-start",
@@ -168,6 +184,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "flex-start",
     gap: 16,
+    ...topAlertShadow,
   },
   contentWithoutCloseButton: {
     justifyContent: "center",

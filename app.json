@@ -7,12 +7,10 @@
     "icon": "./assets/images/icon.png",
     "scheme": "booapp",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.chorockkim.booapp",
       "appleTeamId": "57T5382AXX",
-      "softwareKeyboardLayoutMode": "pan",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
@@ -23,7 +21,6 @@
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/samsung-icon.png"
       },
-      "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "permissions": [
         "android.permission.RECORD_AUDIO",
@@ -39,7 +36,7 @@
       [
         "expo-navigation-bar",
         {
-          "visibility": "hidden"
+          "hidden": true
         }
       ],
       [
@@ -64,11 +61,15 @@
           }
         }
       ],
-      "expo-audio"
+      "expo-audio",
+      "expo-font",
+      "expo-image",
+      "expo-status-bar",
+      "expo-web-browser",
+      "expo-asset"
     ],
     "experiments": {
-      "typedRoutes": true,
-      "reactCompiler": true
+      "typedRoutes": true
     },
     "extra": {
       "router": {},

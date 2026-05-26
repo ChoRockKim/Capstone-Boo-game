@@ -111,7 +111,7 @@ const FriendDeleteModal = ({
 
 const styles = StyleSheet.create({
   overlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     justifyContent: "flex-end",
     backgroundColor: "rgba(18, 18, 49, 0.28)",
     zIndex: 1000,

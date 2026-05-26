@@ -1,3 +1,9 @@
+/**
+ * @description  최초 게임 진입 튜토리얼 확인창과 튜토리얼 이미지 뷰어를 표시합니다.
+ * @depends      components/TutorialPanel/TutorialData.ts, utils/soundEffects.ts
+ * @used-by      app/game/index.tsx
+ * @side-effects basicClick SFX 재생, 튜토리얼 완료 콜백 호출
+ */
 import CrossIcon from "@/assets/icons/cross.svg";
 import { TUTORIAL_IMAGE_ASSETS } from "@/components/TutorialPanel/TutorialData";
 import { colors } from "@/constants/colors";
@@ -131,7 +137,7 @@ const TutorialPanel = ({ onComplete }: TutorialPanelProps) => {
 
 const styles = StyleSheet.create({
   confirmOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     justifyContent: "flex-end",
     backgroundColor: "rgba(18, 18, 49, 0.28)",
     zIndex: 1100,
@@ -189,13 +195,13 @@ const styles = StyleSheet.create({
     color: colors.GREEN_NORMAL,
   },
   viewerOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: "rgba(18, 18, 49, 0.72)",
     zIndex: 1100,
     elevation: 1100,
   },
   tutorialImage: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
   },
   viewerHitArea: {
     position: "absolute",

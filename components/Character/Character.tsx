@@ -1,3 +1,9 @@
+/**
+ * @description  현재 학년과 상태에 맞는 부 캐릭터 이미지를 표시하고 basic/happy 상태 애니메이션을 처리합니다.
+ * @depends      constants/character.ts
+ * @used-by      app/game/index.tsx, components/Room/RoomMiniBoo.tsx
+ * @side-effects interval timer 관리, 이미지 표시 완료 콜백 호출
+ */
 import {
   CHARACTER_IMAGES,
   CharacterGrade,

@@ -1,3 +1,9 @@
+/**
+ * @description  퀴즈 풀이, 정답 확인, 쿨타임/하루 제한 상태를 표시하는 패널입니다.
+ * @depends      stores/useGameStore.ts, utils/soundEffects.ts, components/MainButton/MainButton.tsx, components/QuizPanel/QuizData.ts, components/QuizPanel/QuizAnswerButton.tsx
+ * @used-by      app/game/index.tsx
+ * @side-effects submitQuizAttempt Zustand 액션 호출, quiz SFX 재생, clock interval 관리
+ */
 import CrossIcon from "@/assets/icons/cross.svg";
 import { colors } from "@/constants/colors";
 import { fonts } from "@/constants/fonts";
@@ -21,6 +27,7 @@ import {
   getQuizDailyCountForDate,
   isQuizAnswerCorrect,
   pickRandomQuizQuestion,
+  QUIZ_CORRECT_COIN_REWARD,
   QUIZ_CORRECT_XP_REWARD,
   QUIZ_DAILY_LIMIT,
   QUIZ_WRONG_XP_PENALTY,
@@ -305,8 +312,8 @@ function QuizPanel({ onQuizResultAlert, setIsQuizOpen }: QuizPanelProps) {
           <Text style={styles.helperText}>
             정답: {resultState.answerLabel}
             {resultState.isCorrect
-              ? `  /  +${QUIZ_CORRECT_XP_REWARD} XP`
-              : `  /  -${QUIZ_WRONG_XP_PENALTY} XP`}
+              ? `  /  XP +${QUIZ_CORRECT_XP_REWARD}  /  코인 +${QUIZ_CORRECT_COIN_REWARD}`
+              : `  /  XP -${QUIZ_WRONG_XP_PENALTY}`}
           </Text>
         ) : null}
         <View
@@ -334,7 +341,7 @@ function QuizPanel({ onQuizResultAlert, setIsQuizOpen }: QuizPanelProps) {
 
 const styles = StyleSheet.create({
   root: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     zIndex: 999,
     elevation: 999,
     justifyContent: "flex-end",

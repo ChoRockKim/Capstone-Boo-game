@@ -1,15 +1,23 @@
+/**
+ * @description  마이룸 내부의 미니 부 이동 애니메이션과 방 전용 말풍선을 표시합니다.
+ * @depends      components/BooChat/BooChat.tsx, components/BooChat/BooChatList.ts, components/Character/Character.tsx, components/Room/RoomData.ts, constants/character.ts
+ * @used-by      app/room/index.tsx
+ * @side-effects Animated loop/timing, room chat timeout 관리
+ */
 import BooChat from "@/components/BooChat/BooChat";
 import { getRandomRoomBooChat } from "@/components/BooChat/BooChatList";
 import Character from "@/components/Character/Character";
 import {
+  DEFAULT_ROOM_LAYOUT,
   ROOM_CANVAS_HEIGHT,
   ROOM_CANVAS_WIDTH,
   ROOM_MINI_BOO_LAYOUT,
   ROOM_MINI_BOO_WALK_POINTS,
+  ROOM_SENIOR_MINI_BOO_ON_BED_LAYOUT,
   type RoomMiniBooWalkPoint,
 } from "@/components/Room/RoomData";
 import { CharacterGrade, CharacterState } from "@/constants/character";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Animated, Easing, StyleSheet } from "react-native";
 
 interface RoomMiniBooProps {
@@ -34,9 +42,29 @@ const getRenderedPoint = (
   y: (point.y / ROOM_CANVAS_HEIGHT) * roomHeight,
 });
 
-const getRenderedSize = (roomWidth: number, roomHeight: number) => ({
-  height: (ROOM_MINI_BOO_LAYOUT.height / ROOM_CANVAS_HEIGHT) * roomHeight,
-  width: (ROOM_MINI_BOO_LAYOUT.width / ROOM_CANVAS_WIDTH) * roomWidth,
+const getRenderedSize = (
+  roomWidth: number,
+  roomHeight: number,
+  layout = ROOM_MINI_BOO_LAYOUT,
+) => ({
+  height: (layout.height / ROOM_CANVAS_HEIGHT) * roomHeight,
+  width: (layout.width / ROOM_CANVAS_WIDTH) * roomWidth,
+});
+
+const getRenderedSeniorOnBedPoint = (
+  roomWidth: number,
+  roomHeight: number,
+) => ({
+  x:
+    ((DEFAULT_ROOM_LAYOUT.bed.x +
+      ROOM_SENIOR_MINI_BOO_ON_BED_LAYOUT.bedOffsetX) /
+      ROOM_CANVAS_WIDTH) *
+    roomWidth,
+  y:
+    ((DEFAULT_ROOM_LAYOUT.bed.y +
+      ROOM_SENIOR_MINI_BOO_ON_BED_LAYOUT.bedOffsetY) /
+      ROOM_CANVAS_HEIGHT) *
+    roomHeight,
 });
 
 const RoomMiniBoo = ({
@@ -59,9 +87,30 @@ const RoomMiniBoo = ({
   const [isWalking, setIsWalking] = useState(false);
   const [roomChatMessage, setRoomChatMessage] = useState("");
   const [isRoomChatVisible, setIsRoomChatVisible] = useState(false);
-  const renderedSize = getRenderedSize(roomWidth, roomHeight);
+  const isSeniorGrade = grade === 4;
+  const seniorPoint = useMemo(
+    () => getRenderedSeniorOnBedPoint(roomWidth, roomHeight),
+    [roomHeight, roomWidth],
+  );
+  const renderedSize = useMemo(
+    () =>
+      getRenderedSize(
+        roomWidth,
+        roomHeight,
+        isSeniorGrade
+          ? ROOM_SENIOR_MINI_BOO_ON_BED_LAYOUT
+          : ROOM_MINI_BOO_LAYOUT,
+      ),
+    [isSeniorGrade, roomHeight, roomWidth],
+  );
 
   useEffect(() => {
+    if (isSeniorGrade) {
+      bobAnimation.setValue(0);
+
+      return undefined;
+    }
+
     const bobLoop = Animated.loop(
       Animated.sequence([
         Animated.timing(bobAnimation, {
@@ -85,7 +134,7 @@ const RoomMiniBoo = ({
       bobLoop.stop();
       bobAnimation.setValue(0);
     };
-  }, [bobAnimation]);
+  }, [bobAnimation, isSeniorGrade]);
 
   useEffect(() => {
     const clearChatTimers = () => {
@@ -130,17 +179,26 @@ const RoomMiniBoo = ({
   useEffect(() => {
     let isActive = true;
     let idleTimer: ReturnType<typeof setTimeout> | null = null;
-    const firstPoint = getRenderedPoint(
-      ROOM_MINI_BOO_WALK_POINTS[0],
-      roomWidth,
-      roomHeight,
-    );
+    const firstPoint = isSeniorGrade
+      ? seniorPoint
+      : getRenderedPoint(
+          ROOM_MINI_BOO_WALK_POINTS[0],
+          roomWidth,
+          roomHeight,
+        );
 
     position.stopAnimation();
     position.setValue(firstPoint);
     walkIndexRef.current = 0;
     setIsWalking(false);
     setFacingDirection(1);
+
+    if (isSeniorGrade) {
+      return () => {
+        isActive = false;
+        position.stopAnimation();
+      };
+    }
 
     const walkToNextPoint = () => {
       const currentIndex = walkIndexRef.current;
@@ -189,7 +247,7 @@ const RoomMiniBoo = ({
 
       position.stopAnimation();
     };
-  }, [position, roomHeight, roomWidth]);
+  }, [isSeniorGrade, position, roomHeight, roomWidth, seniorPoint]);
 
   const bobTranslateY = bobAnimation.interpolate({
     inputRange: [0, 1],
@@ -209,7 +267,9 @@ const RoomMiniBoo = ({
             { translateY: bobTranslateY },
           ],
           width: renderedSize.width,
-          zIndex: ROOM_MINI_BOO_LAYOUT.zIndex,
+          zIndex: isSeniorGrade
+            ? ROOM_SENIOR_MINI_BOO_ON_BED_LAYOUT.zIndex
+            : ROOM_MINI_BOO_LAYOUT.zIndex,
         },
       ]}
     >
@@ -232,7 +292,7 @@ const RoomMiniBoo = ({
         ]}
       >
         <Character
-          animationIntervalMs={isWalking ? 480 : 900}
+          animationIntervalMs={isSeniorGrade ? 1200 : isWalking ? 480 : 900}
           grade={grade}
           state={state}
         />

@@ -1,3 +1,9 @@
+/**
+ * @description  캐릭터 학년/상태 타입과 상태별 이미지 registry를 정의합니다.
+ * @depends      assets/characters/*
+ * @used-by      stores/useGameStore.ts, utils/xpProgress.ts, app/game/index.tsx, components/Character/Character.tsx, components/EvolutionOverlay/EvolutionOverlay.tsx, components/Room/RoomMiniBoo.tsx, components/BooChat/BooChatList.ts
+ * @side-effects 정적 이미지 require
+ */
 export type CharacterGrade = 1 | 2 | 3 | 4;
 
 export type CharacterState =

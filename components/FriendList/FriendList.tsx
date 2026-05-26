@@ -173,7 +173,7 @@ const FriendList = ({
 
 const styles = StyleSheet.create({
   root: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     zIndex: 999,
     elevation: 999,
     justifyContent: "flex-end",
@@ -223,14 +223,22 @@ const styles = StyleSheet.create({
   moreButton: {
     marginTop: 16,
     minHeight: 48,
-    borderWidth: 2,
-    borderRadius: 6,
+    borderWidth: 1,
+    borderRadius: 4,
     borderColor: colors.BLACK_NORMAL,
     backgroundColor: colors.WHITE_NORMAL,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 10,
+    elevation: 3,
+    shadowColor: colors.NAVY_NORMAL,
+    shadowOffset: {
+      width: 2,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 2,
   },
   moreButtonPressed: {
     backgroundColor: colors.GOLD_LIGHT_ACTIVE,

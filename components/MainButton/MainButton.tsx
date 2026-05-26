@@ -1,3 +1,9 @@
+/**
+ * @description  픽셀 테두리 SVG를 그리는 주요 CTA 버튼입니다.
+ * @depends      constants/colors.ts, constants/fonts.ts, utils/soundEffects.ts
+ * @used-by      app/index.tsx, components/* 패널
+ * @side-effects basicClick SFX 재생, onPress 콜백 호출
+ */
 import { colors } from "@/constants/colors";
 import { fonts } from "@/constants/fonts";
 import { playSoundEffect } from "@/utils/soundEffects";

@@ -1,3 +1,9 @@
+/**
+ * @description  누적 XP를 현재 학년, 학년 내 XP, 다음 단계 정보로 계산합니다.
+ * @depends      constants/character.ts
+ * @used-by      stores/useGameStore.ts, app/game/index.tsx, app/room/index.tsx, components/DeveloperPanel/DeveloperPanel.tsx
+ * @side-effects 없음
+ */
 import { CharacterGrade, CharacterLifeStage } from "@/constants/character";
 
 const GRADE_XP_REQUIREMENTS: Record<CharacterGrade, number> = {

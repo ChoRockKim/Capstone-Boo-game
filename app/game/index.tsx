@@ -1,3 +1,9 @@
+/**
+ * @description  메인 게임 화면의 캐릭터, 학식, 퀴즈, 친구, 알림, 튜토리얼, 진화 흐름을 조율합니다.
+ * @depends      stores/useGameStore.ts, useHook/useTodayMeal.ts, utils/backgroundMusic.ts, utils/getTodayMeal.ts, utils/soundEffects.ts, utils/xpProgress.ts, components/*
+ * @used-by      expo-router/entry
+ * @side-effects Zustand 상태 변경, BGM/SFX 재생, 이미지 preload, router 이동, 타이머/interval 관리
+ */
 import ball from "@/assets/icons/ball.svg";
 import cap from "@/assets/icons/cap.svg";
 import home from "@/assets/icons/home.svg";
@@ -21,6 +27,11 @@ import FriendList from "@/components/FriendList/FriendList";
 import FriendPanel from "@/components/FriendPanel/FriendPanel";
 import LoadingOverlay from "@/components/LoadingOverlay/LoadingOverlay";
 import {
+  LOADING_OVERLAY_BACKGROUND_IMAGE,
+  preloadLoadingOverlayAssets,
+} from "@/components/LoadingOverlay/LoadingOverlayAssets";
+import { preloadMiniGamePlaceImageAssets } from "@/components/MiniGame/MiniGameData";
+import {
   formatMealCountdown,
   getMealAvailabilityStatus,
   PLATE_IMAGE_ASSETS,
@@ -34,7 +45,10 @@ import {
   getAvailableQuizQuestions,
   getNextQuizAvailabilityTime,
   getQuizDailyCountForDate,
+  QUIZ_CORRECT_COIN_REWARD,
+  QUIZ_CORRECT_XP_REWARD,
   QUIZ_DAILY_LIMIT,
+  QUIZ_WRONG_XP_PENALTY,
 } from "@/components/QuizPanel/QuizData";
 import QuizPanel from "@/components/QuizPanel/QuizPanel";
 import { ROOM_IMAGE_ASSETS } from "@/components/Room/RoomData";
@@ -59,13 +73,22 @@ import {
   getWeekendBooChatMessage,
   type TodayMealSection,
 } from "@/utils/getTodayMeal";
+import {
+  preloadImageAssets,
+  type PreloadableImageAsset,
+} from "@/utils/preloadImageAssets";
 import { playSoundEffect } from "@/utils/soundEffects";
 import { getRequiredXpForGrade, getXpProgressInfo } from "@/utils/xpProgress";
-import { Image as ExpoImage, Image } from "expo-image";
+import { Image } from "expo-image";
 import { router, useFocusEffect } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import {
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 import {
   SafeAreaView,
   useSafeAreaInsets,
@@ -99,7 +122,7 @@ const GAME_IMAGE_ASSETS = [
   ...PLATE_IMAGE_ASSETS,
   ...ROOM_IMAGE_ASSETS,
   ...TUTORIAL_IMAGE_ASSETS,
-];
+] as PreloadableImageAsset[];
 
 let hasPreloadedGameImageAssets = false;
 let gameImageAssetsPreloadPromise: Promise<void> | null = null;
@@ -110,9 +133,7 @@ const preloadGameImageAssets = () => {
   }
 
   if (!gameImageAssetsPreloadPromise) {
-    gameImageAssetsPreloadPromise = Promise.all(
-      GAME_IMAGE_ASSETS.map((source) => ExpoImage.loadAsync(source)),
-    )
+    gameImageAssetsPreloadPromise = preloadImageAssets(GAME_IMAGE_ASSETS)
       .catch(() => undefined)
       .then(() => {
         hasPreloadedGameImageAssets = true;
@@ -179,6 +200,7 @@ export default function Index() {
   const [isQuizOpen, setIsQuizOpen] = useState(false);
   const [isTutorialOpen, setIsTutorialOpen] = useState(false);
   const [isDeveloperPanelOpen, setIsDeveloperPanelOpen] = useState(false);
+  const [isMiniGameLoading, setIsMiniGameLoading] = useState(false);
   const [isBackgroundReady, setIsBackgroundReady] = useState(
     hasPreloadedGameImageAssets,
   );
@@ -318,7 +340,10 @@ export default function Index() {
     let isMounted = true;
 
     const preloadGameAssets = async () => {
-      await preloadGameImageAssets();
+      await Promise.all([
+        preloadLoadingOverlayAssets(),
+        preloadGameImageAssets(),
+      ]);
 
       if (isMounted) {
         setAreGameAssetsLoaded(true);
@@ -395,6 +420,7 @@ export default function Index() {
   useEffect(() => {
     isAnyOverlayOpenRef.current =
       isGameLoadingVisible ||
+      isMiniGameLoading ||
       isEvolutionBusy ||
       isTutorialOpen ||
       isDeveloperPanelOpen ||
@@ -409,6 +435,7 @@ export default function Index() {
     isDeveloperPanelOpen,
     isEvolutionBusy,
     isGameLoadingVisible,
+    isMiniGameLoading,
     isTutorialOpen,
     isFriendListOpen,
     isFriendOpen,
@@ -433,6 +460,7 @@ export default function Index() {
     if (
       hasCheckedTutorialPromptRef.current ||
       isGameLoadingVisible ||
+      isMiniGameLoading ||
       isEvolutionBusy ||
       isDeveloperPanelOpen ||
       isOptionOpen ||
@@ -455,6 +483,7 @@ export default function Index() {
     isFriendListOpen,
     isFriendOpen,
     isGameLoadingVisible,
+    isMiniGameLoading,
     isMealOpen,
     isOptionOpen,
     isProfileOpen,
@@ -598,6 +627,28 @@ export default function Index() {
       visible: false,
     }));
   }, []);
+
+  const handleMiniGamePress = useCallback(() => {
+    if (isEvolutionBusy || isMiniGameLoading) {
+      return;
+    }
+
+    closeAllPanelsToMain();
+    setIsMiniGameLoading(true);
+
+    void preloadMiniGamePlaceImageAssets()
+      .then(() => {
+        router.replace("/miniGame");
+      })
+      .catch((error) => {
+        console.warn("Failed to preload mini game place images.", error);
+        setIsMiniGameLoading(false);
+        showTopAlert("로딩 실패", "미니게임 이미지를 불러오지 못했어요.", {
+          autoHideDuration: 1800,
+          textSize: "compact",
+        });
+      });
+  }, [closeAllPanelsToMain, isEvolutionBusy, isMiniGameLoading, showTopAlert]);
 
   const showSkippedMealPenaltyAlert = useCallback(
     (xpPenalty: number) => {
@@ -796,6 +847,7 @@ export default function Index() {
       if (
         isEvolutionBusy ||
         isGameLoadingVisible ||
+        isMiniGameLoading ||
         isTutorialOpen ||
         isBooChatVisible ||
         isDeveloperPanelOpen ||
@@ -822,6 +874,7 @@ export default function Index() {
     getContextualBooChatMessage,
     isEvolutionBusy,
     isGameLoadingVisible,
+    isMiniGameLoading,
     isTutorialOpen,
     isDeveloperPanelOpen,
     isBooChatVisible,
@@ -913,7 +966,9 @@ export default function Index() {
 
       showTopAlert(
         isCorrect ? "퀴즈 정답!" : "퀴즈 오답!",
-        isCorrect ? "XP가 30 증가합니다" : "XP가 10 감소합니다",
+        isCorrect
+          ? `XP +${QUIZ_CORRECT_XP_REWARD} / 코인 +${QUIZ_CORRECT_COIN_REWARD}`
+          : `XP -${QUIZ_WRONG_XP_PENALTY}`,
       );
 
       if (!isCorrect) {
@@ -962,7 +1017,7 @@ export default function Index() {
       />
       <Image
         style={StyleSheet.absoluteFill}
-        source={require("../../assets/images/inGameMain.png")}
+        source={LOADING_OVERLAY_BACKGROUND_IMAGE}
         contentFit="cover"
         cachePolicy="memory-disk"
         onDisplay={() => setIsBackgroundReady(true)}
@@ -1008,8 +1063,13 @@ export default function Index() {
               disabled={isEvolutionSequenceActive}
               Icon={home}
               onPress={() => router.replace("/room")}
+              shadow
             />
-            <CoinBox coin={coin} dimmed={isEvolutionSequenceActive} />
+            <CoinBox
+              coin={coin}
+              dimmed={isEvolutionSequenceActive}
+              shadow
+            />
           </View>
           <View style={styles.topRightControlGroup}>
             <View style={styles.topRightButtonRow}>
@@ -1026,6 +1086,7 @@ export default function Index() {
                   setIsQuizOpen(false);
                   setIsFriendOpen((prev) => !prev);
                 }}
+                shadow
               />
               <SquareButton
                 disabled={isEvolutionSequenceActive}
@@ -1040,6 +1101,7 @@ export default function Index() {
                   setIsQuizOpen(false);
                   setIsOptionOpen((prev) => !prev);
                 }}
+                shadow
               />
             </View>
             {developerModeEnabled && !isDeveloperPanelOpen && (
@@ -1062,6 +1124,7 @@ export default function Index() {
                   }}
                   style={({ pressed }) => [
                     styles.developerShortcutButton,
+                    styles.gameUiShadow,
                     isEvolutionSequenceActive &&
                       styles.developerShortcutButtonDisabled,
                     pressed && styles.developerShortcutButtonPressed,
@@ -1079,6 +1142,7 @@ export default function Index() {
           dimmed={isEvolutionSequenceActive}
           grade={displayedGrade}
           maxXp={displayedProgressMaxXp}
+          shadow
           xp={displayedProgressXp}
         />
         <View
@@ -1100,6 +1164,7 @@ export default function Index() {
                 handleQuizOpenPress();
               }}
               size="M"
+              shadow
             />
             {quizCountdownText ? (
               <Text style={styles.quizCountdownText}>{quizCountdownText}</Text>
@@ -1132,6 +1197,7 @@ export default function Index() {
                 setIsMealOpen((prev) => !prev);
               }}
               size="M"
+              shadow
             />
             {mealAvailability.shouldShowCountdown && (
               <Text style={styles.mealCountdownText}>{mealCountdownText}</Text>
@@ -1139,15 +1205,11 @@ export default function Index() {
           </View>
           <View style={styles.bigButtonSlot}>
             <SquareButton
-              disabled={isEvolutionSequenceActive}
+              disabled={isEvolutionSequenceActive || isMiniGameLoading}
               Icon={ball}
-              onPress={() => {
-                showTopAlert("준비 중", "아직 개발되지 않은 기능이에요.", {
-                  autoHideDuration: 1800,
-                  textSize: "compact",
-                });
-              }}
+              onPress={handleMiniGamePress}
               size="M"
+              shadow
             />
           </View>
         </View>
@@ -1223,7 +1285,7 @@ export default function Index() {
           }}
         />
       )}
-      {isGameLoadingVisible && <LoadingOverlay />}
+      {(isGameLoadingVisible || isMiniGameLoading) && <LoadingOverlay />}
     </View>
   );
 }
@@ -1317,16 +1379,16 @@ const styles = StyleSheet.create({
     zIndex: 0,
   },
   interactionBlocker: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     zIndex: 1500,
     elevation: 1500,
   },
   evolutionBackdrop: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: "rgba(0, 0, 0, 0.4)",
   },
   characterLayer: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     zIndex: 1,
     elevation: 1,
   },
@@ -1354,5 +1416,15 @@ const styles = StyleSheet.create({
   },
   booChat: {
     position: "relative",
+  },
+  gameUiShadow: {
+    elevation: 3,
+    shadowColor: colors.NAVY_NORMAL,
+    shadowOffset: {
+      width: 2,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 2,
   },
 });

@@ -1,3 +1,9 @@
+/**
+ * @description  학년 상승 진화 컷신의 캐릭터 깜빡임과 smoke 이미지를 렌더링합니다.
+ * @depends      constants/character.ts, assets/images/big-smoke.png
+ * @used-by      app/game/index.tsx
+ * @side-effects Animated timing, blink/smoke timeout 관리
+ */
 import type { CharacterGrade } from "@/constants/character";
 import { CHARACTER_IMAGES } from "@/constants/character";
 import { Image } from "expo-image";
@@ -161,12 +167,12 @@ function EvolutionOverlay({
 
 const styles = StyleSheet.create({
   root: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: "center",
     justifyContent: "center",
   },
   overlayLayer: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: "center",
     justifyContent: "center",
     zIndex: 20,
@@ -181,7 +187,7 @@ const styles = StyleSheet.create({
     tintColor: "#FFFFFF",
   },
   smokeWrapper: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: "center",
     justifyContent: "center",
     zIndex: 30,

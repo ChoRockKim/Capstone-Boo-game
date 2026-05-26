@@ -1,5 +1,12 @@
+/**
+ * @description  퀴즈 문제 데이터와 하루 제한/쿨타임/정답 판정 유틸을 제공합니다.
+ * @depends      없음
+ * @used-by      stores/useGameStore.ts, app/game/index.tsx, components/QuizPanel/QuizPanel.tsx
+ * @side-effects Math.random 기반 문제 선택
+ */
 export const QUIZ_DAILY_LIMIT = 3;
 export const QUIZ_COOLDOWN_MS = 1000 * 60 * 60 * 3;
+export const QUIZ_CORRECT_COIN_REWARD = 10;
 export const QUIZ_CORRECT_XP_REWARD = 30;
 export const QUIZ_WRONG_XP_PENALTY = 10;
 

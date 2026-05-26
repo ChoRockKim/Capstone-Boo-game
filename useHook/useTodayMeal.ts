@@ -1,3 +1,9 @@
+/**
+ * @description  오늘 학식 데이터를 TanStack Query로 가져오는 커스텀 훅입니다.
+ * @depends      utils/getTodayMeal.ts
+ * @used-by      app/game/index.tsx
+ * @side-effects React Query cache 갱신, getTodayMeal 네트워크 요청 실행
+ */
 import { useQuery } from "@tanstack/react-query";
 import { getTodayMeal, TodayMealSection } from "@/utils/getTodayMeal";
 

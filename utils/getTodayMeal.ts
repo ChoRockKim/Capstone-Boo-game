@@ -1,3 +1,9 @@
+/**
+ * @description  학식 API 응답을 앱에서 쓰는 오늘 학식 데이터와 말풍선 문구로 정규화합니다.
+ * @depends      components/MealPanel/MealMenuData.ts
+ * @used-by      useHook/useTodayMeal.ts, app/game/index.tsx
+ * @side-effects axios 네트워크 요청
+ */
 import { MealSectionId } from "@/components/MealPanel/MealMenuData";
 import axios from "axios";
 

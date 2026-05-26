@@ -1,3 +1,9 @@
+/**
+ * @description  게임 전역 상태와 XP/식사/퀴즈/친구/마이룸/설정 액션을 관리하는 Zustand store입니다.
+ * @depends      components/FriendList/FriendListDummyData.ts, components/MealPanel/MealMenuData.ts, components/QuizPanel/QuizData.ts, components/Room/RoomData.ts, constants/character.ts, utils/xpProgress.ts
+ * @used-by      app/_layout.tsx, app/game/index.tsx, app/room/index.tsx, components/* 패널
+ * @side-effects AsyncStorage persist, Zustand 상태 변경, eating timeout 관리
+ */
 import {
   FRIEND_LIST_DUMMY_DATA,
   FriendListItem,
@@ -15,6 +21,7 @@ import {
   getQuizDailyCountForDate,
   getQuizLocalDateKey,
   isQuizAvailableByCooldown,
+  QUIZ_CORRECT_COIN_REWARD,
   QUIZ_CORRECT_XP_REWARD,
   QUIZ_DAILY_LIMIT,
   QUIZ_WRONG_XP_PENALTY,
@@ -22,10 +29,15 @@ import {
 } from "@/components/QuizPanel/QuizData";
 import {
   DEFAULT_EQUIPPED_ROOM_ITEMS,
+  DEFAULT_EQUIPPED_ROOM_WALLPAPER,
+  DEFAULT_OWNED_ROOM_ITEMS,
+  DEFAULT_OWNED_ROOM_WALLPAPERS,
   EquippedRoomItems,
   ROOM_ITEM_ASSETS,
+  ROOM_WALLPAPER_ASSETS,
   RoomItemId,
   RoomSlotId,
+  RoomWallpaperId,
 } from "@/components/Room/RoomData";
 import { CharacterGrade, CharacterState } from "@/constants/character";
 import { getTotalXpForGrade, getXpProgressInfo } from "@/utils/xpProgress";
@@ -72,6 +84,28 @@ export type MealStatusSyncResult = {
   xpPenalty: number;
 };
 
+export type RoomWallpaperPurchaseResult =
+  | {
+      ok: true;
+    }
+  | {
+      ok: false;
+      reason: "already_owned" | "insufficient_coin" | "not_found";
+    };
+
+export type RoomItemPurchaseResult = RoomWallpaperPurchaseResult;
+
+export type GuestbookEntry = {
+  authorName: string;
+  authorStudentId: string;
+  createdAt: string;
+  friendId: string;
+  id: string;
+  message: string;
+};
+
+export type GuestbookEntriesByFriendId = Record<string, GuestbookEntry[]>;
+
 type GameStoreState = {
   appliedSkippedMealPenaltyCount: number;
   booName: string;
@@ -79,13 +113,17 @@ type GameStoreState = {
   coin: number;
   developerModeEnabled: boolean;
   equippedRoomItems: EquippedRoomItems;
+  equippedRoomWallpaper: RoomWallpaperId;
   friendList: FriendListItem[];
+  guestbookEntries: GuestbookEntriesByFriendId;
   hasSeenGameTutorial: boolean;
   lastFedMeals: MealHistory;
   lastFedMealSlotIndex: number;
   masterVolume: number;
   mealDayMode: MealDayMode;
   mealRestrictionEnabled: boolean;
+  ownedRoomItems: RoomItemId[];
+  ownedRoomWallpapers: RoomWallpaperId[];
   pendingEvolution: PendingEvolution | null;
   quizAttemptHistory: QuizAttemptHistory;
   quizDailyCount: number;
@@ -104,10 +142,19 @@ type GameStoreActions = {
   adjustXp: (delta: number) => void;
   addSkippedMealForTest: () => void;
   addFriend: (friend: FriendListItem) => void;
+  addGuestbookEntry: (
+    friendId: string,
+    message: string,
+    createdAt?: Date,
+  ) => GuestbookEntry | null;
   clearPendingEvolution: () => void;
   clearMealHistory: () => void;
   clearQuizHistory: () => void;
   feedBoo: (mealCost: number, mealSectionId: MealSectionId | null) => boolean;
+  purchaseRoomItem: (itemId: RoomItemId) => RoomItemPurchaseResult;
+  purchaseRoomWallpaper: (
+    wallpaperId: RoomWallpaperId,
+  ) => RoomWallpaperPurchaseResult;
   removeFriend: (friendId: string) => void;
   resetGameState: () => void;
   setBooName: (booName: string) => void;
@@ -115,6 +162,7 @@ type GameStoreActions = {
   setCoin: (coin: number) => void;
   setDeveloperModeEnabled: (enabled: boolean) => void;
   setEquippedRoomItem: (slotId: RoomSlotId, itemId: RoomItemId) => void;
+  setEquippedRoomWallpaper: (wallpaperId: RoomWallpaperId) => void;
   setFriendList: (friendList: FriendListItem[]) => void;
   setGameState: (patch: Partial<GameStoreState>) => void;
   setHasSeenGameTutorial: (hasSeenGameTutorial: boolean) => void;
@@ -138,6 +186,7 @@ type GameStoreActions = {
         reason: "cooldown" | "daily_limit";
       }
     | {
+        coinDelta: number;
         ok: true;
         xpDelta: number;
       };
@@ -158,7 +207,9 @@ const createInitialGameState = (): GameStoreState => ({
   coin: 100,
   developerModeEnabled: false,
   equippedRoomItems: { ...DEFAULT_EQUIPPED_ROOM_ITEMS },
+  equippedRoomWallpaper: DEFAULT_EQUIPPED_ROOM_WALLPAPER,
   friendList: [...FRIEND_LIST_DUMMY_DATA],
+  guestbookEntries: {},
   hasSeenGameTutorial: false,
   characterState: DEFAULT_CHARACTER_STATE,
   lastFedMeals: {},
@@ -166,6 +217,8 @@ const createInitialGameState = (): GameStoreState => ({
   masterVolume: DEFAULT_MASTER_VOLUME,
   mealDayMode: "auto",
   mealRestrictionEnabled: true,
+  ownedRoomItems: [...DEFAULT_OWNED_ROOM_ITEMS],
+  ownedRoomWallpapers: [...DEFAULT_OWNED_ROOM_WALLPAPERS],
   pendingEvolution: null,
   quizAttemptHistory: {},
   quizDailyCount: 0,
@@ -344,6 +397,31 @@ export const useGameStore = create<GameStore>()(
             friendList: [...state.friendList, friend],
           };
         }),
+      addGuestbookEntry: (friendId, message, createdAt = new Date()) => {
+        const trimmedMessage = message.trim();
+
+        if (!friendId || !trimmedMessage) {
+          return null;
+        }
+
+        const entry: GuestbookEntry = {
+          id: `${friendId}-${createdAt.getTime()}`,
+          authorName: get().userName,
+          authorStudentId: get().studentId,
+          createdAt: createdAt.toISOString(),
+          friendId,
+          message: trimmedMessage.slice(0, 15),
+        };
+
+        set((state) => ({
+          guestbookEntries: {
+            ...state.guestbookEntries,
+            [friendId]: [...(state.guestbookEntries[friendId] ?? []), entry],
+          },
+        }));
+
+        return entry;
+      },
       clearPendingEvolution: () => set({ pendingEvolution: null }),
       clearMealHistory: () => {
         clearEatingTimeout();
@@ -370,6 +448,81 @@ export const useGameStore = create<GameStore>()(
           quizDailyCount: 0,
           quizDailyCountDateKey: "",
         });
+      },
+      purchaseRoomItem: (itemId) => {
+        const item = ROOM_ITEM_ASSETS[itemId];
+
+        if (!item) {
+          return {
+            ok: false as const,
+            reason: "not_found" as const,
+          };
+        }
+
+        const { coin, ownedRoomItems } = get();
+
+        if (ownedRoomItems.includes(itemId)) {
+          return {
+            ok: false as const,
+            reason: "already_owned" as const,
+          };
+        }
+
+        if (coin < item.price) {
+          return {
+            ok: false as const,
+            reason: "insufficient_coin" as const,
+          };
+        }
+
+        set((state) => ({
+          coin: coin - item.price,
+          equippedRoomItems: {
+            ...state.equippedRoomItems,
+            [item.slotId]: itemId,
+          },
+          ownedRoomItems: [...ownedRoomItems, itemId],
+        }));
+
+        return {
+          ok: true as const,
+        };
+      },
+      purchaseRoomWallpaper: (wallpaperId) => {
+        const wallpaper = ROOM_WALLPAPER_ASSETS[wallpaperId];
+
+        if (!wallpaper) {
+          return {
+            ok: false as const,
+            reason: "not_found" as const,
+          };
+        }
+
+        const { coin, ownedRoomWallpapers } = get();
+
+        if (ownedRoomWallpapers.includes(wallpaperId)) {
+          return {
+            ok: false as const,
+            reason: "already_owned" as const,
+          };
+        }
+
+        if (coin < wallpaper.price) {
+          return {
+            ok: false as const,
+            reason: "insufficient_coin" as const,
+          };
+        }
+
+        set({
+          coin: coin - wallpaper.price,
+          equippedRoomWallpaper: wallpaperId,
+          ownedRoomWallpapers: [...ownedRoomWallpapers, wallpaperId],
+        });
+
+        return {
+          ok: true as const,
+        };
       },
       syncMealStatus: (preserveEatingState = true) => {
         const {
@@ -515,6 +668,9 @@ export const useGameStore = create<GameStore>()(
           : -QUIZ_WRONG_XP_PENALTY;
 
         set((state) => ({
+          coin: isCorrect
+            ? state.coin + QUIZ_CORRECT_COIN_REWARD
+            : state.coin,
           pendingEvolution: createPendingEvolution({
             currentPendingEvolution: state.pendingEvolution,
             currentTotalXp: totalXp,
@@ -532,6 +688,7 @@ export const useGameStore = create<GameStore>()(
         }));
 
         return {
+          coinDelta: isCorrect ? QUIZ_CORRECT_COIN_REWARD : 0,
           ok: true as const,
           xpDelta,
         };
@@ -543,7 +700,10 @@ export const useGameStore = create<GameStore>()(
         set({ developerModeEnabled }),
       setEquippedRoomItem: (slotId, itemId) =>
         set((state) => {
-          if (ROOM_ITEM_ASSETS[itemId]?.slotId !== slotId) {
+          if (
+            ROOM_ITEM_ASSETS[itemId]?.slotId !== slotId ||
+            !state.ownedRoomItems.includes(itemId)
+          ) {
             return state;
           }
 
@@ -552,6 +712,19 @@ export const useGameStore = create<GameStore>()(
               ...state.equippedRoomItems,
               [slotId]: itemId,
             },
+          };
+        }),
+      setEquippedRoomWallpaper: (wallpaperId) =>
+        set((state) => {
+          if (
+            !ROOM_WALLPAPER_ASSETS[wallpaperId] ||
+            !state.ownedRoomWallpapers.includes(wallpaperId)
+          ) {
+            return state;
+          }
+
+          return {
+            equippedRoomWallpaper: wallpaperId,
           };
         }),
       setFriendList: (friendList) => set({ friendList }),
@@ -628,13 +801,17 @@ export const useGameStore = create<GameStore>()(
         coin: state.coin,
         developerModeEnabled: state.developerModeEnabled,
         equippedRoomItems: state.equippedRoomItems,
+        equippedRoomWallpaper: state.equippedRoomWallpaper,
         friendList: state.friendList,
+        guestbookEntries: state.guestbookEntries,
         hasSeenGameTutorial: state.hasSeenGameTutorial,
         lastFedMeals: state.lastFedMeals,
         lastFedMealSlotIndex: state.lastFedMealSlotIndex,
         masterVolume: state.masterVolume,
         mealDayMode: state.mealDayMode,
         mealRestrictionEnabled: state.mealRestrictionEnabled,
+        ownedRoomItems: state.ownedRoomItems,
+        ownedRoomWallpapers: state.ownedRoomWallpapers,
         quizAttemptHistory: state.quizAttemptHistory,
         quizDailyCount: state.quizDailyCount,
         quizDailyCountDateKey: state.quizDailyCountDateKey,
@@ -648,7 +825,39 @@ export const useGameStore = create<GameStore>()(
       }),
       onRehydrateStorage: () => (state) => {
         clearEatingTimeout();
-        state?.syncMealStatus(false);
+
+        if (!state) {
+          return;
+        }
+
+        const ownedRoomItems = new Set<RoomItemId>([
+          ...DEFAULT_OWNED_ROOM_ITEMS,
+          ...(state.ownedRoomItems ?? []),
+        ]);
+        const equippedRoomItems: EquippedRoomItems = {
+          ...DEFAULT_EQUIPPED_ROOM_ITEMS,
+          ...state.equippedRoomItems,
+        };
+
+        (Object.keys(DEFAULT_EQUIPPED_ROOM_ITEMS) as RoomSlotId[]).forEach(
+          (slotId) => {
+            const equippedItemId = equippedRoomItems[slotId];
+
+            if (ROOM_ITEM_ASSETS[equippedItemId]?.slotId !== slotId) {
+              equippedRoomItems[slotId] = DEFAULT_EQUIPPED_ROOM_ITEMS[slotId];
+            }
+
+            ownedRoomItems.add(equippedRoomItems[slotId]);
+          },
+        );
+
+        state.setGameState({
+          equippedRoomItems,
+          ownedRoomItems: [...ownedRoomItems].filter(
+            (itemId) => !!ROOM_ITEM_ASSETS[itemId],
+          ),
+        });
+        state.syncMealStatus(false);
       },
     },
   ),

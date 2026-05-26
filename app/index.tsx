@@ -1,3 +1,9 @@
+/**
+ * @description  로그인/회원가입으로 진입하는 루트 화면입니다.
+ * @depends      components/Login/Login.tsx, components/MainButton/MainButton.tsx, components/Register/RegisterContainer.tsx, utils/backgroundMusic.ts
+ * @used-by      expo-router/entry
+ * @side-effects titleLogin BGM 세션 시작, 로그인/회원가입 패널 UI 상태 변경
+ */
 import { colors } from "@/constants/colors";
 import Login from "@/components/Login/Login";
 import MainButton from "@/components/MainButton/MainButton";
@@ -87,7 +93,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   dimOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: "rgba(0, 0, 0, 0.28)",
   },
   mainTitle: {

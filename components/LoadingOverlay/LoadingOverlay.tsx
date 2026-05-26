@@ -1,3 +1,15 @@
+/**
+ * @description  게임 에셋 준비 중 배경/달걀/Loading 텍스트 애니메이션을 표시합니다.
+ * @depends      components/LoadingOverlay/LoadingOverlayAssets.ts, constants/colors.ts, constants/fonts.ts
+ * @used-by      app/game/index.tsx
+ * @side-effects loading frame interval 관리
+ */
+import {
+  LOADING_OVERLAY_BACKGROUND_IMAGE,
+  LOADING_OVERLAY_EGG_CLOSED_IMAGE,
+  LOADING_OVERLAY_EGG_OPENED_IMAGE,
+  preloadLoadingOverlayAssets,
+} from "@/components/LoadingOverlay/LoadingOverlayAssets";
 import { colors } from "@/constants/colors";
 import { fonts } from "@/constants/fonts";
 import { Image } from "expo-image";
@@ -8,9 +20,6 @@ interface LoadingOverlayProps {
   label?: string;
 }
 
-const EGG_CLOSED_IMAGE = require("@/assets/images/egg-closed.png");
-const EGG_OPENED_IMAGE = require("@/assets/images/egg-opened.png");
-const LOADING_BACKGROUND_IMAGE = require("@/assets/images/inGameMain.png");
 const LOADING_SEQUENCE = [
   { openedEggCount: 0, textLength: 2 },
   { openedEggCount: 1, textLength: 5 },
@@ -25,10 +34,13 @@ const LoadingOverlay = ({
   label = "Loading...",
 }: LoadingOverlayProps) => {
   const [frameIndex, setFrameIndex] = useState(0);
+  const [isBackgroundVisible, setIsBackgroundVisible] = useState(false);
   const currentFrame = LOADING_SEQUENCE[frameIndex];
   const visibleLabel = label.slice(0, currentFrame.textLength);
 
   useEffect(() => {
+    void preloadLoadingOverlayAssets();
+
     const animationTimer = setInterval(() => {
       setFrameIndex((prev) => (prev + 1) % LOADING_SEQUENCE.length);
     }, LOADING_FRAME_MS);
@@ -39,10 +51,15 @@ const LoadingOverlay = ({
   return (
     <View pointerEvents="auto" style={styles.overlay}>
       <Image
-        style={StyleSheet.absoluteFill}
-        source={LOADING_BACKGROUND_IMAGE}
+        style={[
+          StyleSheet.absoluteFill,
+          !isBackgroundVisible && styles.hiddenImage,
+        ]}
+        source={LOADING_OVERLAY_BACKGROUND_IMAGE}
         contentFit="cover"
         cachePolicy="memory-disk"
+        onDisplay={() => setIsBackgroundVisible(true)}
+        onError={() => setIsBackgroundVisible(true)}
       />
       <View style={styles.content}>
         <View style={styles.eggRow}>
@@ -52,8 +69,8 @@ const LoadingOverlay = ({
               style={styles.eggImage}
               source={
                 eggIndex < currentFrame.openedEggCount
-                  ? EGG_OPENED_IMAGE
-                  : EGG_CLOSED_IMAGE
+                  ? LOADING_OVERLAY_EGG_OPENED_IMAGE
+                  : LOADING_OVERLAY_EGG_CLOSED_IMAGE
               }
               contentFit="contain"
               cachePolicy="memory-disk"
@@ -73,7 +90,7 @@ const LoadingOverlay = ({
 
 const styles = StyleSheet.create({
   overlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: colors.GRAY_NORMAL,
@@ -84,6 +101,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     marginTop: 6,
+  },
+  hiddenImage: {
+    opacity: 0,
   },
   eggRow: {
     flexDirection: "row",

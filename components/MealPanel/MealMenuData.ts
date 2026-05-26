@@ -1,3 +1,9 @@
+/**
+ * @description  학식 메뉴 데이터, 시간대, 주말/평일 분기, 카운트다운 계산 함수를 제공합니다.
+ * @depends      assets/plates/*
+ * @used-by      stores/useGameStore.ts, utils/getTodayMeal.ts, app/game/index.tsx, components/MealPanel/MealPanel.tsx, components/DeveloperPanel/DeveloperPanel.tsx
+ * @side-effects 정적 이미지 require
+ */
 export type MealSectionId = "breakfast" | "lunch" | "dinner";
 export type MealHistory = Partial<Record<MealSectionId, string>>;
 export type MealDayMode = "auto" | "weekday" | "weekend";

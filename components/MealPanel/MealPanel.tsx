@@ -1,3 +1,9 @@
+/**
+ * @description  학식 메뉴 선택, 식사 가능 여부, 먹이기 액션과 관련 UI를 렌더링합니다.
+ * @depends      stores/useGameStore.ts, utils/soundEffects.ts, components/MainButton/MainButton.tsx, components/MealPanel/MealMenuData.ts, components/MealPanel/MealMenuButton.tsx
+ * @used-by      app/game/index.tsx
+ * @side-effects feedBoo Zustand 액션 호출, eating SFX 재생, clock interval 관리
+ */
 import CrossIcon from "@/assets/icons/cross.svg";
 import MainButton from "@/components/MainButton/MainButton";
 import { colors } from "@/constants/colors";
@@ -182,7 +188,7 @@ const MealPanel = ({
 
 const styles = StyleSheet.create({
   root: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     zIndex: 999,
     elevation: 999,
     justifyContent: "flex-end",
