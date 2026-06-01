@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/refs -- PanResponder callbacks measure a native view ref for drag position. */
 import { colors } from "@/constants/colors";
 import { fonts } from "@/constants/fonts";
 import React, { useCallback, useMemo, useRef, useState } from "react";

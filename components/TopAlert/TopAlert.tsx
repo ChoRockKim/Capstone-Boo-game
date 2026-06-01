@@ -4,6 +4,7 @@
  * @used-by      app/game/index.tsx
  * @side-effects Animated timing/spring, auto-hide timeout, close SFX 재생
  */
+/* eslint-disable react-hooks/refs -- React Native Animated.Value instances are rendered directly into Animated styles. */
 import CrossIcon from "@/assets/icons/cross.svg";
 import { colors } from "@/constants/colors";
 import { fonts } from "@/constants/fonts";

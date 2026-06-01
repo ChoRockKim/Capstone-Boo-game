@@ -8,23 +8,63 @@ import { colors } from "@/constants/colors";
 import Login from "@/components/Login/Login";
 import MainButton from "@/components/MainButton/MainButton";
 import RegisterContainer from "@/components/Register/RegisterContainer";
+import { useGameStore } from "@/stores/useGameStore";
 import { startBackgroundMusicSession } from "@/utils/backgroundMusic";
 import { Image } from "expo-image";
-import { useFocusEffect } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { StyleSheet, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 export default function Index() {
   const [isRegisterOpen, setIsRegisterOpen] = useState(false);
   const [isLoginOpen, setIsLoginOpen] = useState(false);
+  const [hasHydratedStore, setHasHydratedStore] = useState(() =>
+    useGameStore.persist.hasHydrated(),
+  );
+  const accessToken = useGameStore((state) => state.accessToken);
+  const autoLoginEnabled = useGameStore((state) => state.autoLoginEnabled);
+  const shouldSkipLoginScreen =
+    hasHydratedStore && autoLoginEnabled && !!accessToken;
+
+  useEffect(() => {
+    if (hasHydratedStore) {
+      return undefined;
+    }
+
+    const unsubscribe = useGameStore.persist.onFinishHydration(() => {
+      setHasHydratedStore(true);
+    });
+
+    return unsubscribe;
+  }, [hasHydratedStore]);
 
   useFocusEffect(
     useCallback(() => {
+      if (!hasHydratedStore || shouldSkipLoginScreen) {
+        return undefined;
+      }
+
       return startBackgroundMusicSession("titleLogin");
-    }, []),
+    }, [hasHydratedStore, shouldSkipLoginScreen]),
   );
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!shouldSkipLoginScreen) {
+        return undefined;
+      }
+
+      router.replace("/game");
+
+      return undefined;
+    }, [shouldSkipLoginScreen]),
+  );
+
+  if (!hasHydratedStore || shouldSkipLoginScreen) {
+    return <View style={styles.backgroundImage} />;
+  }
 
   return (
     <View style={styles.backgroundImage}>

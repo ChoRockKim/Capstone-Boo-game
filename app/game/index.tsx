@@ -4,6 +4,7 @@
  * @used-by      expo-router/entry
  * @side-effects Zustand 상태 변경, BGM/SFX 재생, 이미지 preload, router 이동, 타이머/interval 관리
  */
+/* eslint-disable react-hooks/refs, react-hooks/set-state-in-effect -- This route orchestrates timers, loading gates, overlays, and persisted refs. */
 import ball from "@/assets/icons/ball.svg";
 import cap from "@/assets/icons/cap.svg";
 import home from "@/assets/icons/home.svg";
@@ -55,13 +56,17 @@ import { ROOM_IMAGE_ASSETS } from "@/components/Room/RoomData";
 import SoundSettings from "@/components/SoundSettings/SoundSettings";
 import SquareButton from "@/components/SquareButton/SquareButton";
 import TopAlert from "@/components/TopAlert/TopAlert";
-import { TUTORIAL_IMAGE_ASSETS } from "@/components/TutorialPanel/TutorialData";
+import {
+  preloadTutorialImageAssets,
+  TUTORIAL_IMAGE_ASSETS,
+} from "@/components/TutorialPanel/TutorialData";
 import TutorialPanel from "@/components/TutorialPanel/TutorialPanel";
 import { CHARACTER_IMAGES, type CharacterState } from "@/constants/character";
 import { colors } from "@/constants/colors";
 import { fonts } from "@/constants/fonts";
 import type { PendingEvolution } from "@/stores/useGameStore";
 import { useGameStore } from "@/stores/useGameStore";
+import { useSyncServerUserStatsOnFocus } from "@/useHook/useSyncServerUserStatsOnFocus";
 import { useTodayMeal } from "@/useHook/useTodayMeal";
 import {
   pauseBackgroundMusicForOverlay,
@@ -77,8 +82,10 @@ import {
   preloadImageAssets,
   type PreloadableImageAsset,
 } from "@/utils/preloadImageAssets";
+import { getQuizPlayStatus } from "@/utils/serverApi";
 import { playSoundEffect } from "@/utils/soundEffects";
 import { getRequiredXpForGrade, getXpProgressInfo } from "@/utils/xpProgress";
+import { useQuery } from "@tanstack/react-query";
 import { Image } from "expo-image";
 import { router, useFocusEffect } from "expo-router";
 import { StatusBar } from "expo-status-bar";
@@ -210,6 +217,7 @@ type TopAlertState = {
 
 export default function Index() {
   const insets = useSafeAreaInsets();
+  useSyncServerUserStatsOnFocus();
   const booChatTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const quizCorrectHappyTimeoutRef = useRef<ReturnType<
     typeof setTimeout
@@ -220,6 +228,7 @@ export default function Index() {
   const evolutionSequenceTimersRef = useRef<ReturnType<typeof setTimeout>[]>(
     [],
   );
+  const hasShownMealBooChatRef = useRef(false);
   const hasShownWeekendBooChatRef = useRef(false);
   const isBooChatVisibleRef = useRef(false);
   const isAnyOverlayOpenRef = useRef(false);
@@ -269,6 +278,7 @@ export default function Index() {
     visible: false,
   });
   const { todayMealSections } = useTodayMeal();
+  const accessToken = useGameStore((state) => state.accessToken);
   const booName = useGameStore((state) => state.booName);
   const characterState = useGameStore((state) => state.characterState);
   const clearPendingEvolution = useGameStore(
@@ -334,35 +344,62 @@ export default function Index() {
   const mealCountdownText = mealAvailability.shouldShowCountdown
     ? formatMealCountdown(mealAvailability.nextMeal.startsAt, mealNow)
     : "";
-  const quizCountToday = getQuizDailyCountForDate(
+  const isServerQuizEnabled = !!accessToken;
+  const { data: serverQuizStatus, isLoading: isServerQuizStatusLoading } =
+    useQuery({
+      queryKey: ["quizzes", "playStatus", accessToken],
+      queryFn: () => getQuizPlayStatus(accessToken ?? undefined),
+      enabled: isServerQuizEnabled,
+      staleTime: 1000 * 30,
+      gcTime: 1000 * 60 * 5,
+      retry: 1,
+    });
+  const localQuizCountToday = getQuizDailyCountForDate(
     quizDailyCount,
     quizDailyCountDateKey,
     mealNow,
   );
-  const availableQuizQuestions = useMemo(
+  const localAvailableQuizQuestions = useMemo(
     () =>
       getAvailableQuizQuestions(quizAttemptHistory, mealNow, {
         ignoreCooldown: !quizDailyLimitEnabled,
       }),
     [mealNow, quizAttemptHistory, quizDailyLimitEnabled],
   );
-  const nextQuizAvailableAt = useMemo(
+  const localNextQuizAvailableAt = useMemo(
     () =>
       quizDailyLimitEnabled
         ? getNextQuizAvailabilityTime(quizAttemptHistory, mealNow)
         : null,
     [mealNow, quizAttemptHistory, quizDailyLimitEnabled],
   );
-  const isQuizDailyLimitReached =
-    quizDailyLimitEnabled && quizCountToday >= QUIZ_DAILY_LIMIT;
-  const isQuizCooldownLocked =
+  const serverQuizNextAvailableAt = serverQuizStatus?.next_available_at
+    ? new Date(serverQuizStatus.next_available_at)
+    : null;
+  const isServerQuizDailyLimitReached =
+    isServerQuizEnabled && (serverQuizStatus?.remaining_today ?? 1) <= 0;
+  const isServerQuizUnavailable =
+    isServerQuizEnabled &&
+    (isServerQuizStatusLoading || serverQuizStatus?.can_play_now !== true);
+  const isLocalQuizDailyLimitReached =
+    quizDailyLimitEnabled && localQuizCountToday >= QUIZ_DAILY_LIMIT;
+  const isLocalQuizCooldownLocked =
     quizDailyLimitEnabled &&
-    !isQuizDailyLimitReached &&
-    availableQuizQuestions.length === 0;
+    !isLocalQuizDailyLimitReached &&
+    localAvailableQuizQuestions.length === 0;
+  const isQuizDailyLimitReached = isServerQuizEnabled
+    ? isServerQuizDailyLimitReached
+    : isLocalQuizDailyLimitReached;
+  const isQuizCooldownLocked = isServerQuizEnabled
+    ? isServerQuizUnavailable && !isServerQuizDailyLimitReached
+    : isLocalQuizCooldownLocked;
   const isQuizButtonDisabled = isQuizDailyLimitReached || isQuizCooldownLocked;
-  const nextQuizUnlockAt = isQuizDailyLimitReached
-    ? getNextQuizDailyResetAt(mealNow)
-    : nextQuizAvailableAt;
+  const nextQuizUnlockAt = isServerQuizEnabled
+    ? (serverQuizNextAvailableAt ??
+      (isServerQuizDailyLimitReached ? getNextQuizDailyResetAt(mealNow) : null))
+    : isQuizDailyLimitReached
+      ? getNextQuizDailyResetAt(mealNow)
+      : localNextQuizAvailableAt;
   const quizCountdownText =
     isQuizButtonDisabled && nextQuizUnlockAt
       ? formatMealCountdown(nextQuizUnlockAt, mealNow)
@@ -491,10 +528,12 @@ export default function Index() {
   }, [todayMealSections]);
 
   useEffect(() => {
+    let isCancelled = false;
+
     if (hasSeenGameTutorial) {
       hasCheckedTutorialPromptRef.current = false;
       setIsTutorialOpen(false);
-      return;
+      return undefined;
     }
 
     if (
@@ -511,11 +550,21 @@ export default function Index() {
       isMealOpen ||
       isQuizOpen
     ) {
-      return;
+      return undefined;
     }
 
     hasCheckedTutorialPromptRef.current = true;
-    setIsTutorialOpen(true);
+    void preloadTutorialImageAssets()
+      .catch(() => undefined)
+      .then(() => {
+        if (!isCancelled) {
+          setIsTutorialOpen(true);
+        }
+      });
+
+    return () => {
+      isCancelled = true;
+    };
   }, [
     hasSeenGameTutorial,
     isDeveloperPanelOpen,
@@ -606,12 +655,15 @@ export default function Index() {
   );
 
   const getContextualBooChatMessage = useCallback(() => {
-    const mealTalkMessage = getTodayMealTalkMessage(
-      todayMealSectionsRef.current,
-    );
+    if (!hasShownMealBooChatRef.current) {
+      const mealTalkMessage = getTodayMealTalkMessage(
+        todayMealSectionsRef.current,
+      );
 
-    if (mealTalkMessage) {
-      return mealTalkMessage;
+      if (mealTalkMessage) {
+        hasShownMealBooChatRef.current = true;
+        return mealTalkMessage;
+      }
     }
 
     if (hasShownWeekendBooChatRef.current) {
@@ -626,6 +678,52 @@ export default function Index() {
 
     return weekendTalkMessage;
   }, []);
+
+  useEffect(() => {
+    if (
+      hasShownMealBooChatRef.current ||
+      isEvolutionBusy ||
+      isGameLoadingVisible ||
+      isMiniGameLoading ||
+      isTutorialOpen ||
+      isBooChatVisible ||
+      isDeveloperPanelOpen ||
+      isOptionOpen ||
+      isProfileOpen ||
+      isFriendOpen ||
+      isFriendListOpen ||
+      isSoundSettingsOpen ||
+      isMealOpen ||
+      isQuizOpen
+    ) {
+      return;
+    }
+
+    const mealTalkMessage = getTodayMealTalkMessage(todayMealSections);
+
+    if (!mealTalkMessage) {
+      return;
+    }
+
+    hasShownMealBooChatRef.current = true;
+    showBooChat(mealTalkMessage);
+  }, [
+    isBooChatVisible,
+    isDeveloperPanelOpen,
+    isEvolutionBusy,
+    isFriendListOpen,
+    isFriendOpen,
+    isGameLoadingVisible,
+    isMealOpen,
+    isMiniGameLoading,
+    isOptionOpen,
+    isProfileOpen,
+    isQuizOpen,
+    isSoundSettingsOpen,
+    isTutorialOpen,
+    showBooChat,
+    todayMealSections,
+  ]);
 
   const closeAllPanelsToMain = useCallback(() => {
     setIsDeveloperPanelOpen(false);
@@ -812,6 +910,7 @@ export default function Index() {
       queueEvolutionTimer,
       stopEvolutionAudioAndTimers,
       setCharacterState,
+      showBooChat,
       showTopAlert,
       syncMealStatus,
       booName,
@@ -969,9 +1068,17 @@ export default function Index() {
   }, [mealAvailability, mealNow, showTopAlert]);
 
   const showQuizUnavailableAlert = useCallback(() => {
+    if (isServerQuizEnabled && isServerQuizStatusLoading) {
+      showTopAlert("퀴즈 상태 확인 중", "잠시 후 다시 눌러주세요.", {
+        autoHideDuration: 1800,
+        textSize: "compact",
+      });
+      return;
+    }
+
     if (isQuizDailyLimitReached) {
       const resetCountdownText = formatMealCountdown(
-        getNextQuizDailyResetAt(mealNow),
+        nextQuizUnlockAt ?? getNextQuizDailyResetAt(mealNow),
         mealNow,
       );
 
@@ -986,8 +1093,8 @@ export default function Index() {
       return;
     }
 
-    const remainingText = nextQuizAvailableAt
-      ? formatQuizCooldownRemaining(nextQuizAvailableAt, mealNow)
+    const remainingText = nextQuizUnlockAt
+      ? formatQuizCooldownRemaining(nextQuizUnlockAt, mealNow)
       : "조금";
 
     showTopAlert(
@@ -998,7 +1105,14 @@ export default function Index() {
         textSize: "compact",
       },
     );
-  }, [isQuizDailyLimitReached, mealNow, nextQuizAvailableAt, showTopAlert]);
+  }, [
+    isQuizDailyLimitReached,
+    isServerQuizEnabled,
+    isServerQuizStatusLoading,
+    mealNow,
+    nextQuizUnlockAt,
+    showTopAlert,
+  ]);
 
   const handleQuizResultAlert = useCallback(
     (isCorrect: boolean) => {
@@ -1448,7 +1562,7 @@ const styles = StyleSheet.create({
   },
   booChatAnchor: {
     position: "absolute",
-    top: 0,
+    top: -40,
     left: 0,
     right: 0,
     alignItems: "center",

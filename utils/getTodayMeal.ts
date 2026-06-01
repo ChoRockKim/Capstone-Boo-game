@@ -13,6 +13,8 @@ const UNAVAILABLE_MEAL_KEYWORDS = [
   "운영정보없음",
   "미운영",
   "휴무",
+  "공휴일",
+  "대체휴일",
   "운영안함",
   "없음",
 ] as const;
@@ -28,16 +30,21 @@ export interface TodayMealSection {
   menus: string[];
 }
 
-interface RawMealMenu {
-  name?: string | null;
+interface CrawledMealMenu {
+  name: string;
+  price: string;
 }
 
-interface RawMealSection {
-  mealType?: string | null;
-  menus?: (RawMealMenu | string)[] | null;
-  name?: string | null;
-  title?: string | null;
-  type?: string | null;
+interface CrawledMealSection {
+  menus: CrawledMealMenu[];
+  time: string;
+}
+
+interface CrawledMealApiResponse {
+  meals?: unknown;
+  notices?: unknown;
+  schedule?: unknown;
+  timestamp?: unknown;
 }
 
 const MEAL_SECTION_LABELS: Record<MealSectionId, string> = {
@@ -76,10 +83,35 @@ const normalizeMealSectionId = (value: string): MealSectionId | null => {
   return null;
 };
 
-const normalizeMenuName = (menu: RawMealMenu | string): string | null => {
-  const rawName = typeof menu === "string" ? menu : menu?.name;
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null;
 
-  if (!rawName) {
+const isCrawledMealMenu = (value: unknown): value is CrawledMealMenu =>
+  isRecord(value) &&
+  typeof value.name === "string" &&
+  typeof value.price === "string";
+
+const isCrawledMealSection = (value: unknown): value is CrawledMealSection =>
+  isRecord(value) &&
+  typeof value.time === "string" &&
+  Array.isArray(value.menus) &&
+  value.menus.every(isCrawledMealMenu);
+
+const getCrawledMealSections = (
+  responseData: CrawledMealApiResponse,
+): CrawledMealSection[] => {
+  if (!Array.isArray(responseData.meals)) {
+    return [];
+  }
+
+  return responseData.meals.filter(isCrawledMealSection);
+};
+
+const normalizeMenuName = (menu: CrawledMealMenu): string | null => {
+  const rawName = menu.name;
+  const rawPrice = menu.price;
+
+  if (!rawName || !rawPrice.trim()) {
     return null;
   }
 
@@ -103,13 +135,9 @@ const isWeekend = (date: Date) => {
 };
 
 const normalizeMealSection = (
-  rawMealSection: RawMealSection,
+  rawMealSection: CrawledMealSection,
 ): TodayMealSection | null => {
-  const mealSectionSource =
-    rawMealSection.type ??
-    rawMealSection.mealType ??
-    rawMealSection.title ??
-    rawMealSection.name;
+  const mealSectionSource = rawMealSection.time;
 
   if (!mealSectionSource) {
     return null;
@@ -135,23 +163,78 @@ const normalizeMealSection = (
   };
 };
 
-export const getTodayMeal = async (): Promise<TodayMealSection[]> => {
-  const response = await axios.get(TODAY_MEAL_API_URL);
-  const rawMealSections = Array.isArray(response.data?.meals)
-    ? (response.data.meals as RawMealSection[])
-    : [];
-  const normalizedSections = rawMealSections
+const MEAL_SECTION_LABEL_ORDER: MealSectionId[] = [
+  "breakfast",
+  "lunch",
+  "dinner",
+];
+
+const getWeekdayMealIndex = (date: Date) => {
+  const day = date.getDay();
+
+  if (day === 0 || day === 6) {
+    return null;
+  }
+
+  return day - 1;
+};
+
+export const getTodayMeal = async (
+  date: Date = new Date(),
+): Promise<TodayMealSection[]> => {
+  const response = await axios.get<CrawledMealApiResponse>(TODAY_MEAL_API_URL);
+  const rawMealSections = getCrawledMealSections(response.data);
+
+  return getTodayMealFromRawSections(rawMealSections, date);
+};
+
+export const getTodayMealFromRawSections = (
+  rawMealSections: CrawledMealSection[],
+  date: Date = new Date(),
+) => {
+  const weekdayMealIndex = getWeekdayMealIndex(date);
+
+  if (weekdayMealIndex === null) {
+    return [];
+  }
+
+  const todayMealSections = rawMealSections
+    .map((section) => ({
+      ...section,
+      menus: section.menus[weekdayMealIndex]
+        ? [section.menus[weekdayMealIndex]]
+        : [],
+    }))
+    .filter((section) => section.menus.length > 0);
+  const normalizedSections = todayMealSections
     .map(normalizeMealSection)
     .filter((section): section is TodayMealSection => !!section);
 
-  return normalizedSections.reduce<TodayMealSection[]>((sections, section) => {
-    if (sections.some((existingSection) => existingSection.id === section.id)) {
+  const sectionsById = normalizedSections.reduce<
+    Partial<Record<MealSectionId, TodayMealSection>>
+  >((sections, section) => {
+    const existingSection = sections[section.id];
+
+    if (existingSection) {
+      section.menus.forEach((menuName) => {
+        if (!existingSection.menus.includes(menuName)) {
+          existingSection.menus.push(menuName);
+        }
+      });
+
       return sections;
     }
 
-    sections.push(section);
+    sections[section.id] = {
+      ...section,
+      menus: [...section.menus],
+    };
     return sections;
-  }, []);
+  }, {});
+
+  return MEAL_SECTION_LABEL_ORDER.map((id) => sectionsById[id]).filter(
+    (section): section is TodayMealSection => !!section,
+  );
 };
 
 export const getTodayMealTalkMessage = (

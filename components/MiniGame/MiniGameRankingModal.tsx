@@ -68,6 +68,9 @@ const MiniGameRankingModal = ({
           showsVerticalScrollIndicator={false}
           style={styles.entryList}
         >
+          {!visibleEntries.length ? (
+            <Text style={styles.emptyText}>랭킹 데이터가 아직 없어요.</Text>
+          ) : null}
           {visibleEntries.map((entry, index) => {
             const rank = index + 1;
 
@@ -259,6 +262,13 @@ const styles = StyleSheet.create({
   },
   scoreTextPressed: {
     color: colors.GREEN_NORMAL,
+  },
+  emptyText: {
+    color: colors.SILVER_NORMAL_ACTIVE,
+    fontFamily: fonts.BASIC,
+    fontSize: 16,
+    paddingVertical: 24,
+    textAlign: "center",
   },
   moreButton: {
     marginTop: 16,

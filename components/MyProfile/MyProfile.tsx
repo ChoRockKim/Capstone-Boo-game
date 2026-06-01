@@ -4,8 +4,9 @@ import UserCircleIcon from "@/assets/icons/User-circle.svg";
 import { colors } from "@/constants/colors";
 import { fonts } from "@/constants/fonts";
 import { useGameStore } from "@/stores/useGameStore";
+import { syncServerUserStats } from "@/utils/syncServerUserStats";
 import { Feather } from "@expo/vector-icons";
-import React from "react";
+import React, { useEffect } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import ProfileButton from "./ProfileButton";
 
@@ -15,8 +16,23 @@ interface MyProfileType {
 }
 
 const MyProfile = ({ setIsOptionOpen, setIsProfileOpen }: MyProfileType) => {
+  const accessToken = useGameStore((state) => state.accessToken);
   const booName = useGameStore((state) => state.booName);
+  const userEmail = useGameStore((state) => state.userEmail);
+  const userEmailVerified = useGameStore((state) => state.userEmailVerified);
+  const userName = useGameStore((state) => state.userName);
+  const userNickname = useGameStore((state) => state.userNickname);
   const studentId = useGameStore((state) => state.studentId);
+
+  useEffect(() => {
+    if (!accessToken) {
+      return;
+    }
+
+    void syncServerUserStats(accessToken).catch((error) => {
+      console.warn("내 정보 동기화 실패", error);
+    });
+  }, [accessToken]);
 
   const handleBackPress = () => {
     setIsProfileOpen(false);
@@ -51,7 +67,7 @@ const MyProfile = ({ setIsOptionOpen, setIsProfileOpen }: MyProfileType) => {
               }
             />
           )}
-          label="아이디"
+          label="학번"
           value={studentId}
         />
         <ProfileButton
@@ -64,8 +80,37 @@ const MyProfile = ({ setIsOptionOpen, setIsProfileOpen }: MyProfileType) => {
               }
             />
           )}
+          label="이름"
+          value={userName}
+        />
+        <ProfileButton
+          icon={(pressed) => (
+            <Feather
+              name="at-sign"
+              size={20}
+              color={
+                pressed ? colors.WHITE_NORMAL : colors.SILVER_NORMAL_ACTIVE
+              }
+            />
+          )}
+          label="이메일"
+          value={userEmail || "미등록"}
+          valueColor={
+            userEmailVerified ? colors.GREEN_NORMAL : colors.SILVER_NORMAL
+          }
+        />
+        <ProfileButton
+          icon={(pressed) => (
+            <Feather
+              name="tag"
+              size={20}
+              color={
+                pressed ? colors.WHITE_NORMAL : colors.SILVER_NORMAL_ACTIVE
+              }
+            />
+          )}
           label="닉네임"
-          value={booName}
+          value={userNickname || booName}
         />
         <ProfileButton
           icon={(pressed) => (

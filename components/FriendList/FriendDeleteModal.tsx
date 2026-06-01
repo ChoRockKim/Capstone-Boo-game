@@ -10,6 +10,7 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 type FriendDeleteModalMode = "confirm" | "success";
 
 interface FriendDeleteModalProps {
+  errorMessage?: string;
   friendName: string;
   mode: FriendDeleteModalMode;
   onClose: () => void;
@@ -17,6 +18,7 @@ interface FriendDeleteModalProps {
 }
 
 const FriendDeleteModal = ({
+  errorMessage,
   friendName,
   mode,
   onClose,
@@ -35,6 +37,9 @@ const FriendDeleteModal = ({
   const renderConfirmContent = () => (
     <>
       <Text style={styles.messageText}>{`${friendName} 님을 삭제할까요?`}</Text>
+      {errorMessage ? (
+        <Text style={styles.errorText}>{errorMessage}</Text>
+      ) : null}
       <View style={styles.choiceList}>
         <Pressable onPress={handleConfirmDelete} style={styles.choiceButton}>
           {({ pressed }) => (
@@ -146,6 +151,14 @@ const styles = StyleSheet.create({
     fontSize: 20,
     lineHeight: 28,
     color: colors.BLACK_NORMAL,
+    includeFontPadding: false,
+  },
+  errorText: {
+    marginTop: 12,
+    fontFamily: fonts.BASIC,
+    fontSize: 14,
+    lineHeight: 20,
+    color: colors.DANGER,
     includeFontPadding: false,
   },
   choiceList: {

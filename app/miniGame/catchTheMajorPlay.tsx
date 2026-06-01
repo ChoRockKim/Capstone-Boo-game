@@ -4,6 +4,7 @@
  * @used-by      expo-router
  * @side-effects miniGameIngame BGM 세션 시작, book-catch 이미지 preload, Reanimated animation/frame callback 관리, 성공 시 coin 변경, basicClick SFX/충돌 haptic 재생, router 이동
  */
+/* eslint-disable react-hooks/immutability, react-hooks/set-state-in-effect -- Reanimated shared values and game-loop phase setup are intentionally imperative. */
 import ArrowBackIcon from "@/assets/icons/arrow-back-return.svg";
 import CrossIcon from "@/assets/icons/cross.svg";
 import HeartFilledIcon from "@/assets/icons/heart-filled.svg";
@@ -20,6 +21,11 @@ import { colors } from "@/constants/colors";
 import { fonts } from "@/constants/fonts";
 import { useGameStore } from "@/stores/useGameStore";
 import { startBackgroundMusicSession } from "@/utils/backgroundMusic";
+import {
+  createMiniGameResult,
+  getServerApiErrorMessage,
+  playMiniGameEconomy,
+} from "@/utils/serverApi";
 import { playSoundEffect } from "@/utils/soundEffects";
 import { getXpProgressInfo } from "@/utils/xpProgress";
 import * as Haptics from "expo-haptics";
@@ -337,8 +343,10 @@ const CatchTheMajorPlayScreen = () => {
     mode === "infinite" || mode === "hard" ? "infinite" : "normal";
   const isInfiniteMode = difficulty === "infinite";
   const difficultyConfig = BOOK_CATCH_DIFFICULTY_CONFIG[difficulty];
+  const accessToken = useGameStore((state) => state.accessToken);
   const adjustCoin = useGameStore((state) => state.adjustCoin);
   const friendList = useGameStore((state) => state.friendList);
+  const setGameState = useGameStore((state) => state.setGameState);
   const totalXp = useGameStore((state) => state.totalXp);
   const xpProgress = useMemo(() => getXpProgressInfo(totalXp), [totalXp]);
   const booImage = CHARACTER_IMAGES.grades[xpProgress.grade].basic1;
@@ -355,14 +363,17 @@ const CatchTheMajorPlayScreen = () => {
     id: 0,
     visible: false,
   });
+  const [coinRewardAmount, setCoinRewardAmount] =
+    useState(SUCCESS_COIN_REWARD);
   const booLaneRef = useRef(1);
   const nextItemIdRef = useRef(1);
-  const gameStartedAtMsRef = useRef(Date.now());
+  const gameStartedAtMsRef = useRef(0);
   const gamePhaseRef = useRef<GamePhase>("preparing");
   const scoreRef = useRef(0);
   const obstacleHitCountRef = useRef(0);
   const collectedScoreItemCountRef = useRef(0);
   const didRewardCoinRef = useRef(false);
+  const didSubmitResultRef = useRef(false);
   const booLaneSharedValue = useSharedValue(1);
   const booTranslateX = useSharedValue(0);
   const shakeX = useSharedValue(0);
@@ -381,6 +392,10 @@ const CatchTheMajorPlayScreen = () => {
     [collectedScoreItemCount],
   );
   const currentRank = useMemo(() => {
+    if (accessToken) {
+      return null;
+    }
+
     const difficultyName = isInfiniteMode ? "infinite" : "normal";
     const higherScoreCount = friendList.filter(
       (friend) =>
@@ -388,7 +403,7 @@ const CatchTheMajorPlayScreen = () => {
     ).length;
 
     return higherScoreCount + 1;
-  }, [friendList, isInfiniteMode, score]);
+  }, [accessToken, friendList, isInfiniteMode, score]);
 
   const getLaneLeft = useCallback(
     (laneIndex: number, itemWidth: number) => {
@@ -469,6 +484,7 @@ const CatchTheMajorPlayScreen = () => {
     shakeY.value = 0;
     shakeRotate.value = 0;
     didRewardCoinRef.current = false;
+    didSubmitResultRef.current = false;
     obstacleHitCountRef.current = 0;
     collectedScoreItemCountRef.current = 0;
     setCoinRewardAlert((currentAlert) => ({
@@ -543,6 +559,7 @@ const CatchTheMajorPlayScreen = () => {
     shakeY.value = 0;
     shakeRotate.value = 0;
     didRewardCoinRef.current = false;
+    didSubmitResultRef.current = false;
     obstacleHitCountRef.current = 0;
     collectedScoreItemCountRef.current = 0;
     setCoinRewardAlert((currentAlert) => ({
@@ -598,7 +615,8 @@ const CatchTheMajorPlayScreen = () => {
     shakeY,
   ]);
 
-  const showCoinRewardAlert = useCallback(() => {
+  const showCoinRewardAlert = useCallback((rewardAmount: number) => {
+    setCoinRewardAmount(rewardAmount);
     setCoinRewardAlert((currentAlert) => ({
       id: currentAlert.id + 1,
       visible: true,
@@ -617,6 +635,66 @@ const CatchTheMajorPlayScreen = () => {
       currentItems.filter((item) => item.id !== id),
     );
   }, []);
+
+  const submitMiniGameResult = useCallback(
+    (finalScore: number, success: boolean, playTimeSeconds: number) => {
+      if (!accessToken || didSubmitResultRef.current) {
+        return;
+      }
+
+      didSubmitResultRef.current = true;
+
+      void createMiniGameResult(
+        {
+          game_type: "catchTheMajor",
+          location: "library",
+          play_time_seconds: playTimeSeconds,
+          score: finalScore,
+          success,
+        },
+        accessToken,
+      ).catch((error) => {
+        console.warn(
+          "전공책 받기 결과 저장 실패",
+          getServerApiErrorMessage(error, "미니게임 결과 저장 실패"),
+        );
+      });
+    },
+    [accessToken],
+  );
+
+  const applyMiniGameSuccessReward = useCallback(async () => {
+    if (!accessToken) {
+      adjustCoin(SUCCESS_COIN_REWARD);
+      showCoinRewardAlert(SUCCESS_COIN_REWARD);
+      return;
+    }
+
+    try {
+      const rewardResult = await playMiniGameEconomy(accessToken);
+
+      setGameState({
+        coin: rewardResult.coin,
+        heart: rewardResult.heart,
+        heartUpdatedAt:
+          rewardResult.spent_heart > 0
+            ? new Date().toISOString()
+            : useGameStore.getState().heartUpdatedAt,
+        maxHeart: rewardResult.max_heart,
+      });
+
+      if (rewardResult.awarded_coin > 0) {
+        showCoinRewardAlert(rewardResult.awarded_coin);
+      }
+    } catch (error) {
+      console.warn(
+        "전공책 받기 보상 동기화 실패",
+        getServerApiErrorMessage(error, "미니게임 보상 동기화 실패"),
+      );
+      adjustCoin(SUCCESS_COIN_REWARD);
+      showCoinRewardAlert(SUCCESS_COIN_REWARD);
+    }
+  }, [accessToken, adjustCoin, setGameState, showCoinRewardAlert]);
 
   const triggerObstacleImpact = useCallback((point: number) => {
     const { haptic, shake } = getObstacleImpactIntensity(point);
@@ -674,6 +752,12 @@ const CatchTheMajorPlayScreen = () => {
         setObstacleHitCount(nextHitCount);
 
         if (nextHitCount >= INFINITE_OBSTACLE_HIT_LIMIT) {
+          const finalScore = scoreRef.current;
+          const elapsedSeconds = Math.round(
+            Math.max(0, Date.now() - gameStartedAtMsRef.current) / 1000,
+          );
+
+          submitMiniGameResult(finalScore, true, elapsedSeconds);
           gamePhaseRef.current = "finished";
           setFallingItems([]);
           setGamePhase("finished");
@@ -691,7 +775,12 @@ const CatchTheMajorPlayScreen = () => {
     }
 
     setScore((currentScore) => Math.max(0, currentScore + point));
-  }, [isInfiniteMode, removeFallingItem, triggerObstacleImpact]);
+  }, [
+    isInfiniteMode,
+    removeFallingItem,
+    submitMiniGameResult,
+    triggerObstacleImpact,
+  ]);
 
   const spawnItem = useCallback(() => {
     setFallingItems((currentItems) => {
@@ -741,13 +830,18 @@ const CatchTheMajorPlayScreen = () => {
 
       if (nextRemainingSeconds <= 0) {
         const finalScore = scoreRef.current;
+        const didClear = finalScore >= SUCCESS_SCORE_THRESHOLD;
 
         clearInterval(timer);
+        submitMiniGameResult(
+          finalScore,
+          didClear,
+          Math.round(GAME_DURATION_MS / 1000),
+        );
 
-        if (finalScore >= SUCCESS_SCORE_THRESHOLD && !didRewardCoinRef.current) {
+        if (didClear && !didRewardCoinRef.current) {
           didRewardCoinRef.current = true;
-          adjustCoin(SUCCESS_COIN_REWARD);
-          showCoinRewardAlert();
+          void applyMiniGameSuccessReward();
         }
 
         setFallingItems([]);
@@ -759,7 +853,13 @@ const CatchTheMajorPlayScreen = () => {
     return () => {
       clearInterval(timer);
     };
-  }, [adjustCoin, gamePhase, hasGameArea, isInfiniteMode, showCoinRewardAlert]);
+  }, [
+    applyMiniGameSuccessReward,
+    gamePhase,
+    hasGameArea,
+    isInfiniteMode,
+    submitMiniGameResult,
+  ]);
 
   useEffect(() => {
     if (!hasGameArea || gamePhase !== "playing") {
@@ -859,7 +959,7 @@ const CatchTheMajorPlayScreen = () => {
         message="보상으로 코인이 추가되었어요."
         onClose={hideCoinRewardAlert}
         textSize="compact"
-        title={"+" + SUCCESS_COIN_REWARD + " 코인 획득!"}
+        title={"+" + coinRewardAmount + " 코인 획득!"}
         visibilityKey={coinRewardAlert.id}
         visible={coinRewardAlert.visible}
       />
@@ -867,7 +967,7 @@ const CatchTheMajorPlayScreen = () => {
         <RNImage
           resizeMode="contain"
           source={booImage}
-          style={styles.imageWarmupItem}
+          style={styles.imageWarmupBoo}
         />
         {BOOK_CATCH_ITEM_IMAGE_ASSETS.map((source, index) => (
           <RNImage
@@ -912,11 +1012,14 @@ const CatchTheMajorPlayScreen = () => {
                 />
               );
             })}
-            <Animated.Image
-              resizeMode="contain"
-              source={booImage}
-              style={[styles.booImage, booAnimatedStyle]}
-            />
+            <Animated.View style={[styles.booImageContainer, booAnimatedStyle]}>
+              <ExpoImage
+                cachePolicy="memory-disk"
+                contentFit="contain"
+                source={booImage}
+                style={styles.booImage}
+              />
+            </Animated.View>
           </>
         ) : null}
       </Animated.View>
@@ -1012,14 +1115,18 @@ const CatchTheMajorPlayScreen = () => {
                 <>
                   <Text style={styles.resultScoreText}>{score} P</Text>
                   <Text style={styles.resultDescriptionText}>
-                    무한 랭킹 {currentRank}위입니다
+                    {currentRank
+                      ? `무한 랭킹 ${currentRank}위입니다`
+                      : "랭킹은 서버 기록으로 집계돼요"}
                   </Text>
                 </>
               ) : didClearSuccessThreshold ? (
                 <>
                   <Text style={styles.resultScoreText}>{score} P</Text>
                   <Text style={styles.resultDescriptionText}>
-                    현재 랭킹 {currentRank}위입니다
+                    {currentRank
+                      ? `현재 랭킹 ${currentRank}위입니다`
+                      : "랭킹은 서버 기록으로 집계돼요"}
                   </Text>
                 </>
               ) : (
@@ -1093,6 +1200,13 @@ const styles = StyleSheet.create({
     width: ITEM_SIZE,
     height: ITEM_SIZE,
   },
+  imageWarmupBoo: {
+    position: "absolute",
+    left: 0,
+    top: 0,
+    width: BOO_SIZE,
+    height: BOO_SIZE,
+  },
   worldLayer: {
     ...StyleSheet.absoluteFill,
     overflow: "hidden",
@@ -1134,6 +1248,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     opacity: 1,
+    ...miniGameUiShadow,
   },
   infiniteHeartBackdrop: {
     position: "absolute",
@@ -1216,7 +1331,7 @@ const styles = StyleSheet.create({
     width: "100%",
     height: "100%",
   },
-  booImage: {
+  booImageContainer: {
     position: "absolute",
     left: 0,
     top: 0,
@@ -1224,6 +1339,10 @@ const styles = StyleSheet.create({
     height: BOO_SIZE,
     zIndex: 2,
     elevation: 2,
+  },
+  booImage: {
+    width: "100%",
+    height: "100%",
   },
   countdownLayer: {
     ...StyleSheet.absoluteFill,

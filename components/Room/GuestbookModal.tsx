@@ -26,7 +26,7 @@ type GuestbookModalStep = "input" | "success";
 
 interface GuestbookModalProps {
   onClose: () => void;
-  onSubmit: (message: string) => void;
+  onSubmit: (message: string) => Promise<void> | void;
 }
 
 const BASE_HEIGHT_BY_STEP: Record<GuestbookModalStep, number> = {
@@ -43,6 +43,7 @@ const GuestbookModal = ({ onClose, onSubmit }: GuestbookModalProps) => {
   const [errorMessage, setErrorMessage] = useState("");
   const [guestbookStep, setGuestbookStep] =
     useState<GuestbookModalStep>("input");
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [message, setMessage] = useState("");
   const trimmedMessage = useMemo(() => message.trim(), [message]);
@@ -73,15 +74,30 @@ const GuestbookModal = ({ onClose, onSubmit }: GuestbookModalProps) => {
     closeModal();
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
+    if (isSubmitting) {
+      return;
+    }
+
     if (!trimmedMessage) {
       setErrorMessage("방명록 내용을 입력해주세요");
       return;
     }
 
     Keyboard.dismiss();
-    onSubmit(trimmedMessage);
-    setGuestbookStep("success");
+
+    try {
+      setIsSubmitting(true);
+      await onSubmit(trimmedMessage);
+      setGuestbookStep("success");
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "방명록 작성에 실패했어요";
+
+      setErrorMessage(message);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const renderContent = () => {
@@ -121,7 +137,7 @@ const GuestbookModal = ({ onClose, onSubmit }: GuestbookModalProps) => {
           <MainButton
             color="blue"
             height={64}
-            label="작성완료"
+            label={isSubmitting ? "작성 중" : "작성완료"}
             onPress={handleSubmit}
             size="S"
             width={280}

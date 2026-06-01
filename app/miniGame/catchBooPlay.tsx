@@ -4,6 +4,7 @@
  * @used-by      expo-router
  * @side-effects miniGameIngame BGM 세션 시작, boo-catch 이미지 preload, 성공 시 coin 변경, SFX/haptic 재생, router 이동
  */
+/* eslint-disable react-hooks/set-state-in-effect -- Game-loop setup intentionally synchronizes timers, assets, and phase state in effects. */
 import ArrowBackIcon from "@/assets/icons/arrow-back-return.svg";
 import CrossIcon from "@/assets/icons/cross.svg";
 import HourglassTimeIcon from "@/assets/icons/hourglass-time.svg";
@@ -17,6 +18,11 @@ import { colors } from "@/constants/colors";
 import { fonts } from "@/constants/fonts";
 import { useGameStore } from "@/stores/useGameStore";
 import { startBackgroundMusicSession } from "@/utils/backgroundMusic";
+import {
+  createMiniGameResult,
+  getServerApiErrorMessage,
+  playMiniGameEconomy,
+} from "@/utils/serverApi";
 import { playSoundEffect } from "@/utils/soundEffects";
 import * as Haptics from "expo-haptics";
 import { Image as ExpoImage } from "expo-image";
@@ -180,9 +186,10 @@ const BooCatchTargetSprite = memo(
     const scaleX = useSharedValue(0.86);
     const scaleY = useSharedValue(0.72);
     const rotate = useSharedValue(0);
-    const wobbleDirectionRef = useRef(Math.random() < 0.5 ? -1 : 1);
+    const wobbleDirectionRef = useRef<-1 | 1>(1);
 
     useEffect(() => {
+      wobbleDirectionRef.current = Math.random() < 0.5 ? -1 : 1;
       const entryOffset = getTargetEntryOffset(target.emergeFrom);
       const isFast = target.exposureMs <= 500;
       const anticipationMs = isFast ? 40 : 70;
@@ -355,8 +362,10 @@ const BooCatchScoreFeedback = memo(({ feedback }: BooCatchScoreFeedbackProps) =>
 BooCatchScoreFeedback.displayName = "BooCatchScoreFeedback";
 
 const CatchBooPlayScreen = () => {
+  const accessToken = useGameStore((state) => state.accessToken);
   const adjustCoin = useGameStore((state) => state.adjustCoin);
   const friendList = useGameStore((state) => state.friendList);
+  const setGameState = useGameStore((state) => state.setGameState);
   const [gameAreaSize, setGameAreaSize] = useState({ height: 0, width: 0 });
   const [activeTargets, setActiveTargets] = useState<BooCatchTarget[]>([]);
   const [scoreFeedbacks, setScoreFeedbacks] = useState<ScoreFeedback[]>([]);
@@ -369,22 +378,29 @@ const CatchBooPlayScreen = () => {
     id: 0,
     visible: false,
   });
+  const [coinRewardAmount, setCoinRewardAmount] =
+    useState(SUCCESS_COIN_REWARD);
   const nextTargetIdRef = useRef(1);
   const nextScoreFeedbackIdRef = useRef(1);
-  const gameStartedAtMsRef = useRef(Date.now());
+  const gameStartedAtMsRef = useRef(0);
   const gamePhaseRef = useRef<GamePhase>("preparing");
   const scoreRef = useRef(0);
   const didRewardCoinRef = useRef(false);
+  const didSubmitResultRef = useRef(false);
   const hasGameArea = gameAreaSize.width > 0 && gameAreaSize.height > 0;
   const didClearSuccessThreshold = score >= SUCCESS_SCORE_THRESHOLD;
 
   const currentRank = useMemo(() => {
+    if (accessToken) {
+      return null;
+    }
+
     const higherScoreCount = friendList.filter(
       (friend) => getFriendMiniGameScore(friend, "catchBoo", "normal") > score,
     ).length;
 
     return higherScoreCount + 1;
-  }, [friendList, score]);
+  }, [accessToken, friendList, score]);
 
   useFocusEffect(
     useCallback(() => {
@@ -483,6 +499,7 @@ const CatchBooPlayScreen = () => {
     nextTargetIdRef.current = 1;
     nextScoreFeedbackIdRef.current = 1;
     didRewardCoinRef.current = false;
+    didSubmitResultRef.current = false;
     setCoinRewardAlert((currentAlert) => ({
       ...currentAlert,
       visible: false,
@@ -493,7 +510,8 @@ const CatchBooPlayScreen = () => {
     setScore(0);
   }, [gamePhase, hasGameArea]);
 
-  const showCoinRewardAlert = useCallback(() => {
+  const showCoinRewardAlert = useCallback((rewardAmount: number) => {
+    setCoinRewardAmount(rewardAmount);
     setCoinRewardAlert((currentAlert) => ({
       id: currentAlert.id + 1,
       visible: true,
@@ -506,6 +524,66 @@ const CatchBooPlayScreen = () => {
       visible: false,
     }));
   }, []);
+
+  const submitMiniGameResult = useCallback(
+    (finalScore: number, success: boolean) => {
+      if (!accessToken || didSubmitResultRef.current) {
+        return;
+      }
+
+      didSubmitResultRef.current = true;
+
+      void createMiniGameResult(
+        {
+          game_type: "catchBoo",
+          location: "lawnPlaza",
+          play_time_seconds: Math.round(GAME_DURATION_MS / 1000),
+          score: finalScore,
+          success,
+        },
+        accessToken,
+      ).catch((error) => {
+        console.warn(
+          "부 잡기 결과 저장 실패",
+          getServerApiErrorMessage(error, "미니게임 결과 저장 실패"),
+        );
+      });
+    },
+    [accessToken],
+  );
+
+  const applyMiniGameSuccessReward = useCallback(async () => {
+    if (!accessToken) {
+      adjustCoin(SUCCESS_COIN_REWARD);
+      showCoinRewardAlert(SUCCESS_COIN_REWARD);
+      return;
+    }
+
+    try {
+      const rewardResult = await playMiniGameEconomy(accessToken);
+
+      setGameState({
+        coin: rewardResult.coin,
+        heart: rewardResult.heart,
+        heartUpdatedAt:
+          rewardResult.spent_heart > 0
+            ? new Date().toISOString()
+            : useGameStore.getState().heartUpdatedAt,
+        maxHeart: rewardResult.max_heart,
+      });
+
+      if (rewardResult.awarded_coin > 0) {
+        showCoinRewardAlert(rewardResult.awarded_coin);
+      }
+    } catch (error) {
+      console.warn(
+        "부 잡기 보상 동기화 실패",
+        getServerApiErrorMessage(error, "미니게임 보상 동기화 실패"),
+      );
+      adjustCoin(SUCCESS_COIN_REWARD);
+      showCoinRewardAlert(SUCCESS_COIN_REWARD);
+    }
+  }, [accessToken, adjustCoin, setGameState, showCoinRewardAlert]);
 
   const createTargetWave = useCallback((elapsedMs: number) => {
     const { simultaneousCount } = getDifficultyConfig(elapsedMs);
@@ -552,13 +630,14 @@ const CatchBooPlayScreen = () => {
 
       if (nextRemainingSeconds <= 0) {
         const finalScore = scoreRef.current;
+        const didClear = finalScore >= SUCCESS_SCORE_THRESHOLD;
 
         clearInterval(timer);
+        submitMiniGameResult(finalScore, didClear);
 
-        if (finalScore >= SUCCESS_SCORE_THRESHOLD && !didRewardCoinRef.current) {
+        if (didClear && !didRewardCoinRef.current) {
           didRewardCoinRef.current = true;
-          adjustCoin(SUCCESS_COIN_REWARD);
-          showCoinRewardAlert();
+          void applyMiniGameSuccessReward();
         }
 
         setActiveTargets([]);
@@ -571,7 +650,12 @@ const CatchBooPlayScreen = () => {
     return () => {
       clearInterval(timer);
     };
-  }, [adjustCoin, gamePhase, hasGameArea, showCoinRewardAlert]);
+  }, [
+    applyMiniGameSuccessReward,
+    gamePhase,
+    hasGameArea,
+    submitMiniGameResult,
+  ]);
 
   useEffect(() => {
     if (gamePhase !== "playing" || !hasGameArea) {
@@ -688,7 +772,7 @@ const CatchBooPlayScreen = () => {
         message="보상으로 코인이 추가되었어요."
         onClose={hideCoinRewardAlert}
         textSize="compact"
-        title={"+" + SUCCESS_COIN_REWARD + " 코인 획득!"}
+        title={"+" + coinRewardAmount + " 코인 획득!"}
         visibilityKey={coinRewardAlert.id}
         visible={coinRewardAlert.visible}
       />
@@ -793,7 +877,9 @@ const CatchBooPlayScreen = () => {
                 <>
                   <Text style={styles.resultScoreText}>{score} P</Text>
                   <Text style={styles.resultDescriptionText}>
-                    현재 랭킹 {currentRank}위입니다
+                    {currentRank
+                      ? `현재 랭킹 ${currentRank}위입니다`
+                      : "랭킹은 서버 기록으로 집계돼요"}
                   </Text>
                 </>
               ) : (

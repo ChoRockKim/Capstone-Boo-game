@@ -206,11 +206,10 @@ export const getMiniGamePlayerStatus = (studentId: string) => {
 };
 
 export const getMiniGameHeartStatus = (
-  studentId: string,
+  playerStatus: MiniGamePlayerStatus,
   nowMs = Date.now(),
   fallbackRecoveryStartedAtMs = nowMs,
 ): MiniGameHeartStatus => {
-  const playerStatus = getMiniGamePlayerStatus(studentId);
   const maxHeartCount = playerStatus.maxHeartCount;
   const baseHeartCount = Math.min(playerStatus.heartCount, maxHeartCount);
 

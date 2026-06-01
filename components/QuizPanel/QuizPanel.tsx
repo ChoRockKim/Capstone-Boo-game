@@ -8,7 +8,15 @@ import CrossIcon from "@/assets/icons/cross.svg";
 import { colors } from "@/constants/colors";
 import { fonts } from "@/constants/fonts";
 import { useGameStore } from "@/stores/useGameStore";
+import {
+  getNextQuiz,
+  getQuizPlayStatus,
+  getServerApiErrorMessage,
+  QuizQuestionOut,
+  submitQuizAnswer,
+} from "@/utils/serverApi";
 import { playSoundEffect } from "@/utils/soundEffects";
+import { useQuery } from "@tanstack/react-query";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Pressable,
@@ -41,14 +49,64 @@ interface QuizPanelProps {
 
 type QuizResultState = {
   answerLabel: string;
+  coinDelta: number;
   description: string;
   isCorrect: boolean;
+  xpDelta: number;
 };
 
 const PANEL_HORIZONTAL_PADDING = 28;
+const normalizeServerQuizOptions = (
+  options: QuizQuestionOut["options"],
+): string[] => {
+  if (Array.isArray(options)) {
+    return options.map(String);
+  }
+
+  if (options && typeof options === "object") {
+    return Object.values(options).map(String);
+  }
+
+  return [];
+};
+
+const mapServerQuizQuestion = (
+  quizQuestion: QuizQuestionOut | null | undefined,
+): QuizQuestion | null => {
+  if (!quizQuestion) {
+    return null;
+  }
+
+  const options = normalizeServerQuizOptions(quizQuestion.options);
+
+  if (options.length > 0) {
+    return {
+      answer: "",
+      id: `server-quiz-${quizQuestion.quiz_id}`,
+      options,
+      question: quizQuestion.question,
+      resultText: "서버에서 채점한 결과입니다.",
+      serverQuizId: quizQuestion.quiz_id,
+      type: "multiple-choice",
+    };
+  }
+
+  return {
+    answer: "O",
+    id: `server-quiz-${quizQuestion.quiz_id}`,
+    question: quizQuestion.question,
+    resultText: "서버에서 채점한 결과입니다.",
+    serverQuizId: quizQuestion.quiz_id,
+    type: "ox",
+  };
+};
 
 function QuizPanel({ onQuizResultAlert, setIsQuizOpen }: QuizPanelProps) {
   const { width } = useWindowDimensions();
+  const accessToken = useGameStore((state) => state.accessToken);
+  const applyServerQuizSubmit = useGameStore(
+    (state) => state.applyServerQuizSubmit,
+  );
   const quizAttemptHistory = useGameStore((state) => state.quizAttemptHistory);
   const quizDailyCount = useGameStore((state) => state.quizDailyCount);
   const quizDailyCountDateKey = useGameStore(
@@ -64,12 +122,51 @@ function QuizPanel({ onQuizResultAlert, setIsQuizOpen }: QuizPanelProps) {
     null,
   );
   const [currentQuestionOrder, setCurrentQuestionOrder] = useState(1);
+  const [isSubmittingAnswer, setIsSubmittingAnswer] = useState(false);
   const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
   const [resultState, setResultState] = useState<QuizResultState | null>(null);
+  const isServerQuizEnabled = !!accessToken;
+  const {
+    data: serverQuizStatus,
+    isLoading: isServerQuizStatusLoading,
+    refetch: refetchServerQuizStatus,
+  } = useQuery({
+    queryKey: ["quizzes", "playStatus", accessToken],
+    queryFn: () => getQuizPlayStatus(accessToken ?? undefined),
+    enabled: isServerQuizEnabled,
+    staleTime: 1000 * 30,
+    gcTime: 1000 * 60 * 5,
+    retry: 1,
+  });
+  const {
+    data: serverNextQuiz,
+    isLoading: isServerNextQuizLoading,
+    refetch: refetchServerNextQuiz,
+  } = useQuery({
+    queryKey: ["quizzes", "next", accessToken, serverQuizStatus?.solved_today],
+    queryFn: () => getNextQuiz(accessToken ?? undefined),
+    enabled: isServerQuizEnabled && serverQuizStatus?.can_play_now === true,
+    staleTime: 0,
+    gcTime: 1000 * 60 * 5,
+    retry: 1,
+  });
+  const serverQuestion = useMemo(
+    () => mapServerQuizQuestion(serverNextQuiz),
+    [serverNextQuiz],
+  );
 
   const quizCountToday = useMemo(
-    () => getQuizDailyCountForDate(quizDailyCount, quizDailyCountDateKey, now),
-    [now, quizDailyCount, quizDailyCountDateKey],
+    () =>
+      isServerQuizEnabled
+        ? (serverQuizStatus?.solved_today ?? 0)
+        : getQuizDailyCountForDate(quizDailyCount, quizDailyCountDateKey, now),
+    [
+      isServerQuizEnabled,
+      now,
+      quizDailyCount,
+      quizDailyCountDateKey,
+      serverQuizStatus,
+    ],
   );
   const availableQuestions = useMemo(
     () =>
@@ -80,20 +177,44 @@ function QuizPanel({ onQuizResultAlert, setIsQuizOpen }: QuizPanelProps) {
   );
   const nextAvailableAt = useMemo(
     () =>
-      quizDailyLimitEnabled
-        ? getNextQuizAvailabilityTime(quizAttemptHistory, now)
-        : null,
-    [now, quizAttemptHistory, quizDailyLimitEnabled],
+      isServerQuizEnabled
+        ? serverQuizStatus?.next_available_at
+          ? new Date(serverQuizStatus.next_available_at)
+          : null
+        : quizDailyLimitEnabled
+          ? getNextQuizAvailabilityTime(quizAttemptHistory, now)
+          : null,
+    [
+      isServerQuizEnabled,
+      now,
+      quizAttemptHistory,
+      quizDailyLimitEnabled,
+      serverQuizStatus,
+    ],
   );
   const canTakeMoreQuizzesToday =
-    !quizDailyLimitEnabled || quizCountToday < QUIZ_DAILY_LIMIT;
-  const hasAvailableQuestion = availableQuestions.length > 0;
-  const isInfoOnlyState = !resultState && !currentQuestion;
+    isServerQuizEnabled
+      ? (serverQuizStatus?.remaining_today ?? 0) > 0
+      : !quizDailyLimitEnabled || quizCountToday < QUIZ_DAILY_LIMIT;
+  const hasAvailableQuestion = isServerQuizEnabled
+    ? !!serverQuestion
+    : availableQuestions.length > 0;
+  const autoQuestion =
+    !resultState && canTakeMoreQuizzesToday && hasAvailableQuestion
+      ? isServerQuizEnabled
+        ? serverQuestion
+        : (availableQuestions[0] ?? null)
+      : null;
+  const activeQuestion = currentQuestion ?? autoQuestion;
+  const activeQuestionOrder =
+    currentQuestion === null ? quizCountToday + 1 : currentQuestionOrder;
+  const isInfoOnlyState = !resultState && !activeQuestion;
   const canSubmitAnswer =
     !resultState &&
-    !!currentQuestion &&
+    !!activeQuestion &&
     !!selectedAnswer &&
-    canTakeMoreQuizzesToday;
+    canTakeMoreQuizzesToday &&
+    !isSubmittingAnswer;
   const actionButtonWidth = width - PANEL_HORIZONTAL_PADDING * 2;
 
   useEffect(() => {
@@ -103,24 +224,6 @@ function QuizPanel({ onQuizResultAlert, setIsQuizOpen }: QuizPanelProps) {
 
     return () => clearInterval(timer);
   }, []);
-
-  useEffect(() => {
-    if (resultState) {
-      return;
-    }
-
-    if (!currentQuestion && canTakeMoreQuizzesToday && hasAvailableQuestion) {
-      setCurrentQuestion(pickRandomQuizQuestion(availableQuestions));
-      setCurrentQuestionOrder(quizCountToday + 1);
-    }
-  }, [
-    availableQuestions,
-    canTakeMoreQuizzesToday,
-    currentQuestion,
-    hasAvailableQuestion,
-    quizCountToday,
-    resultState,
-  ]);
 
   const closeQuizPanel = useCallback(() => {
     setCurrentQuestion(null);
@@ -145,7 +248,7 @@ function QuizPanel({ onQuizResultAlert, setIsQuizOpen }: QuizPanelProps) {
       {
         ignoreCooldown: !isNextQuizDailyLimitEnabled,
       },
-    ).filter((question) => question.id !== currentQuestion?.id);
+    ).filter((question) => question.id !== activeQuestion?.id);
     const nextQuestion = pickRandomQuizQuestion(nextQuestions);
     const nextQuizCountToday = getQuizDailyCountForDate(
       useGameStore.getState().quizDailyCount,
@@ -167,8 +270,13 @@ function QuizPanel({ onQuizResultAlert, setIsQuizOpen }: QuizPanelProps) {
     setResultState(null);
   };
 
-  const handleActionPress = () => {
+  const handleActionPress = async () => {
     if (resultState) {
+      if (isServerQuizEnabled) {
+        closeQuizPanel();
+        return;
+      }
+
       if (pendingEvolution?.trigger === "quiz") {
         closeQuizPanel();
         return;
@@ -183,7 +291,7 @@ function QuizPanel({ onQuizResultAlert, setIsQuizOpen }: QuizPanelProps) {
       return;
     }
 
-    if (!currentQuestion) {
+    if (!activeQuestion) {
       closeQuizPanel();
       return;
     }
@@ -192,8 +300,63 @@ function QuizPanel({ onQuizResultAlert, setIsQuizOpen }: QuizPanelProps) {
       return;
     }
 
-    const isCorrect = isQuizAnswerCorrect(currentQuestion, selectedAnswer);
-    const attemptResult = submitQuizAttempt(currentQuestion.id, isCorrect);
+    if (
+      isServerQuizEnabled &&
+      accessToken &&
+      typeof activeQuestion.serverQuizId === "number"
+    ) {
+      setIsSubmittingAnswer(true);
+
+      try {
+        const submitResult = await submitQuizAnswer(
+          {
+            answer: selectedAnswer,
+            quiz_id: activeQuestion.serverQuizId,
+          },
+          accessToken,
+        );
+
+        applyServerQuizSubmit({
+          coin: submitResult.coin,
+          quizId: activeQuestion.id,
+          totalXp: submitResult.xp_point,
+        });
+        setResultState({
+          answerLabel: submitResult.correct_answer,
+          coinDelta: submitResult.awarded_coin,
+          description:
+            submitResult.detail ||
+            (submitResult.correct ? "정답입니다!" : "아쉽지만 오답이에요."),
+          isCorrect: submitResult.correct,
+          xpDelta: submitResult.awarded_points,
+        });
+        onQuizResultAlert(submitResult.correct);
+        await Promise.all([
+          refetchServerQuizStatus(),
+          refetchServerNextQuiz(),
+        ]);
+      } catch (error) {
+        setCurrentQuestion(null);
+        setSelectedAnswer(null);
+        setResultState({
+          answerLabel: "",
+          coinDelta: 0,
+          description: getServerApiErrorMessage(
+            error,
+            "퀴즈 제출에 실패했어요.",
+          ),
+          isCorrect: false,
+          xpDelta: 0,
+        });
+      } finally {
+        setIsSubmittingAnswer(false);
+      }
+
+      return;
+    }
+
+    const isCorrect = isQuizAnswerCorrect(activeQuestion, selectedAnswer);
+    const attemptResult = submitQuizAttempt(activeQuestion.id, isCorrect);
 
     if (!attemptResult.ok) {
       setCurrentQuestion(null);
@@ -204,9 +367,11 @@ function QuizPanel({ onQuizResultAlert, setIsQuizOpen }: QuizPanelProps) {
     }
 
     setResultState({
-      answerLabel: getQuizAnswerLabel(currentQuestion),
-      description: currentQuestion.resultText,
+      answerLabel: getQuizAnswerLabel(activeQuestion),
+      coinDelta: isCorrect ? QUIZ_CORRECT_COIN_REWARD : 0,
+      description: activeQuestion.resultText,
       isCorrect,
+      xpDelta: isCorrect ? QUIZ_CORRECT_XP_REWARD : -QUIZ_WRONG_XP_PENALTY,
     });
     onQuizResultAlert(isCorrect);
   };
@@ -216,8 +381,16 @@ function QuizPanel({ onQuizResultAlert, setIsQuizOpen }: QuizPanelProps) {
       return `${resultState.isCorrect ? ">> 정답 <<" : ">> 땡 <<"}\n${resultState.description}`;
     }
 
-    if (currentQuestion) {
-      return currentQuestion.question;
+    if (activeQuestion) {
+      return activeQuestion.question;
+    }
+
+    if (isServerNextQuizLoading) {
+      return "퀴즈를\n불러오고 있어요.";
+    }
+
+    if (isServerQuizStatusLoading) {
+      return "퀴즈 상태를\n확인하고 있어요.";
     }
 
     if (!canTakeMoreQuizzesToday) {
@@ -231,17 +404,26 @@ function QuizPanel({ onQuizResultAlert, setIsQuizOpen }: QuizPanelProps) {
     return "지금 풀 수 있는\n퀴즈가 없어요.";
   }, [
     canTakeMoreQuizzesToday,
-    currentQuestion,
+    activeQuestion,
     nextAvailableAt,
     now,
-    pendingEvolution,
+    isServerNextQuizLoading,
+    isServerQuizStatusLoading,
     resultState,
   ]);
+  const quizDailyLimit =
+    isServerQuizEnabled
+      ? (serverQuizStatus?.daily_limit ?? QUIZ_DAILY_LIMIT)
+      : QUIZ_DAILY_LIMIT;
+  const shouldUseDailyLimitText =
+    isServerQuizEnabled || quizDailyLimitEnabled;
 
   const actionButtonLabel = resultState
     ? "> 확인"
-    : currentQuestion
-      ? "> 정답 확인"
+    : activeQuestion
+      ? isSubmittingAnswer
+        ? "> 제출 중"
+        : "> 정답 확인"
       : "> 닫기";
 
   return (
@@ -253,9 +435,9 @@ function QuizPanel({ onQuizResultAlert, setIsQuizOpen }: QuizPanelProps) {
           <View style={styles.headerTextGroup}>
             <Text style={styles.headerText}>퀴즈</Text>
             <Text style={styles.pageText}>
-              {quizDailyLimitEnabled
-                ? `${Math.min(currentQuestionOrder, QUIZ_DAILY_LIMIT)} / ${QUIZ_DAILY_LIMIT}`
-                : `${currentQuestionOrder} / ∞`}
+              {shouldUseDailyLimitText
+                ? `${Math.min(activeQuestionOrder, quizDailyLimit)} / ${quizDailyLimit}`
+                : `${activeQuestionOrder} / ∞`}
             </Text>
           </View>
           <Pressable
@@ -269,7 +451,7 @@ function QuizPanel({ onQuizResultAlert, setIsQuizOpen }: QuizPanelProps) {
         <View style={styles.heroBanner}>
           <Text style={styles.heroText}>{panelHeroText}</Text>
         </View>
-        {!resultState && currentQuestion?.type === "ox" ? (
+        {!resultState && activeQuestion?.type === "ox" ? (
           <View style={styles.oxRow}>
             <QuizAnswerButton
               label="맞다"
@@ -288,10 +470,10 @@ function QuizPanel({ onQuizResultAlert, setIsQuizOpen }: QuizPanelProps) {
           </View>
         ) : null}
         {!resultState &&
-        currentQuestion?.type === "multiple-choice" &&
-        currentQuestion.options.length > 0 ? (
+        activeQuestion?.type === "multiple-choice" &&
+        activeQuestion.options.length > 0 ? (
           <View style={styles.choiceList}>
-            {currentQuestion.options.map((option) => (
+            {activeQuestion.options.map((option) => (
               <QuizAnswerButton
                 key={option}
                 label={option}
@@ -301,9 +483,11 @@ function QuizPanel({ onQuizResultAlert, setIsQuizOpen }: QuizPanelProps) {
             ))}
           </View>
         ) : null}
-        {!resultState && !currentQuestion ? (
+        {!resultState && !activeQuestion ? (
           <Text style={styles.helperText}>
-            {canTakeMoreQuizzesToday
+            {isServerQuizStatusLoading
+              ? "서버 상태를 확인하는 중이에요."
+              : canTakeMoreQuizzesToday
               ? "조금 뒤에 다시 확인해보세요."
               : "내일 다시 퀴즈에 도전할 수 있어요."}
           </Text>
@@ -312,8 +496,8 @@ function QuizPanel({ onQuizResultAlert, setIsQuizOpen }: QuizPanelProps) {
           <Text style={styles.helperText}>
             정답: {resultState.answerLabel}
             {resultState.isCorrect
-              ? `  /  XP +${QUIZ_CORRECT_XP_REWARD}  /  코인 +${QUIZ_CORRECT_COIN_REWARD}`
-              : `  /  XP -${QUIZ_WRONG_XP_PENALTY}`}
+              ? `  /  XP +${resultState.xpDelta}  /  코인 +${resultState.coinDelta}`
+              : `  /  XP ${resultState.xpDelta}`}
           </Text>
         ) : null}
         <View
@@ -324,7 +508,7 @@ function QuizPanel({ onQuizResultAlert, setIsQuizOpen }: QuizPanelProps) {
         >
           <MainButton
             color={
-              canSubmitAnswer || resultState || !currentQuestion
+              canSubmitAnswer || resultState || !activeQuestion
                 ? "blue"
                 : "gray"
             }

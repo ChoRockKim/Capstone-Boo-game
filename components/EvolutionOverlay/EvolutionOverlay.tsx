@@ -4,6 +4,7 @@
  * @used-by      app/game/index.tsx
  * @side-effects Animated timing, blink/smoke timeout 관리
  */
+/* eslint-disable react-hooks/refs, react-hooks/set-state-in-effect -- React Native Animated values and cutscene phase state are imperative by design. */
 import type { CharacterGrade } from "@/constants/character";
 import { CHARACTER_IMAGES } from "@/constants/character";
 import { Image } from "expo-image";

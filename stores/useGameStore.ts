@@ -4,10 +4,7 @@
  * @used-by      app/_layout.tsx, app/game/index.tsx, app/room/index.tsx, components/* 패널
  * @side-effects AsyncStorage persist, Zustand 상태 변경, eating timeout 관리
  */
-import {
-  FRIEND_LIST_DUMMY_DATA,
-  FriendListItem,
-} from "@/components/FriendList/FriendListDummyData";
+import { FriendListItem } from "@/components/FriendList/FriendListDummyData";
 import {
   getLatestCompletedMealSlotIndex,
   getLocalDateKey,
@@ -40,6 +37,11 @@ import {
   RoomWallpaperId,
 } from "@/components/Room/RoomData";
 import { CharacterGrade, CharacterState } from "@/constants/character";
+import {
+  setBooApiAccessToken,
+  setBooApiTokenRefreshHandlers,
+  updateCharacter,
+} from "@/utils/serverApi";
 import { getTotalXpForGrade, getXpProgressInfo } from "@/utils/xpProgress";
 import { create } from "zustand";
 import { createJSONStorage, persist, StateStorage } from "zustand/middleware";
@@ -107,7 +109,9 @@ export type GuestbookEntry = {
 export type GuestbookEntriesByFriendId = Record<string, GuestbookEntry[]>;
 
 type GameStoreState = {
+  accessToken: string | null;
   appliedSkippedMealPenaltyCount: number;
+  autoLoginEnabled: boolean;
   booName: string;
   characterState: CharacterState;
   coin: number;
@@ -117,9 +121,12 @@ type GameStoreState = {
   friendList: FriendListItem[];
   guestbookEntries: GuestbookEntriesByFriendId;
   hasSeenGameTutorial: boolean;
+  heart: number;
+  heartUpdatedAt: string | null;
   lastFedMeals: MealHistory;
   lastFedMealSlotIndex: number;
   masterVolume: number;
+  maxHeart: number;
   mealDayMode: MealDayMode;
   mealRestrictionEnabled: boolean;
   ownedRoomItems: RoomItemId[];
@@ -129,12 +136,19 @@ type GameStoreState = {
   quizDailyCount: number;
   quizDailyCountDateKey: string;
   quizDailyLimitEnabled: boolean;
+  refreshToken: string | null;
+  serverCharacterId: number | null;
   bgmVolume: number;
   skippedMealCount: number;
   sfxVolume: number;
   studentId: string;
   totalXp: number;
+  userEmail: string;
+  userEmailVerified: boolean;
+  userId: number | null;
+  userImage: string | null;
   userName: string;
+  userNickname: string;
 };
 
 type GameStoreActions = {
@@ -147,7 +161,18 @@ type GameStoreActions = {
     message: string,
     createdAt?: Date,
   ) => GuestbookEntry | null;
+  applyServerMealFeed: (result: {
+    coin: number;
+    mealSectionId: MealSectionId | null;
+    totalXp: number;
+  }) => void;
+  applyServerQuizSubmit: (result: {
+    coin: number;
+    quizId: string;
+    totalXp: number;
+  }) => void;
   clearPendingEvolution: () => void;
+  clearAuthSession: () => void;
   clearMealHistory: () => void;
   clearQuizHistory: () => void;
   feedBoo: (mealCost: number, mealSectionId: MealSectionId | null) => boolean;
@@ -157,6 +182,11 @@ type GameStoreActions = {
   ) => RoomWallpaperPurchaseResult;
   removeFriend: (friendId: string) => void;
   resetGameState: () => void;
+  setAuthSession: (session: {
+    accessToken: string;
+    autoLoginEnabled: boolean;
+    refreshToken: string;
+  }) => void;
   setBooName: (booName: string) => void;
   setCharacterState: (characterState: CharacterState) => void;
   setCoin: (coin: number) => void;
@@ -171,10 +201,13 @@ type GameStoreActions = {
   setBgmVolume: (volume: number) => void;
   setMealDayMode: (mode: MealDayMode) => void;
   setMealRestrictionEnabled: (enabled: boolean) => void;
+  setServerCharacterId: (serverCharacterId: number | null) => void;
   setSfxVolume: (volume: number) => void;
   setStudentId: (studentId: string) => void;
   setTotalXp: (totalXp: number) => void;
+  setUserEmail: (userEmail: string) => void;
   setUserName: (userName: string) => void;
+  setUserNickname: (userNickname: string) => void;
   submitQuizAttempt: (
     quizId: string,
     isCorrect: boolean,
@@ -201,20 +234,25 @@ export type GameStore = GameStoreState & GameStoreActions;
 const clampVolume = (volume: number) => Math.max(0, Math.min(volume, 1));
 
 const createInitialGameState = (): GameStoreState => ({
+  accessToken: null,
   appliedSkippedMealPenaltyCount: 0,
+  autoLoginEnabled: false,
   userName: "김외대",
   booName: "부",
   coin: 100,
   developerModeEnabled: false,
   equippedRoomItems: { ...DEFAULT_EQUIPPED_ROOM_ITEMS },
   equippedRoomWallpaper: DEFAULT_EQUIPPED_ROOM_WALLPAPER,
-  friendList: [...FRIEND_LIST_DUMMY_DATA],
+  friendList: [],
   guestbookEntries: {},
   hasSeenGameTutorial: false,
+  heart: 5,
+  heartUpdatedAt: null,
   characterState: DEFAULT_CHARACTER_STATE,
   lastFedMeals: {},
   lastFedMealSlotIndex: getLatestCompletedMealSlotIndex(),
   masterVolume: DEFAULT_MASTER_VOLUME,
+  maxHeart: 5,
   mealDayMode: "auto",
   mealRestrictionEnabled: true,
   ownedRoomItems: [...DEFAULT_OWNED_ROOM_ITEMS],
@@ -224,11 +262,18 @@ const createInitialGameState = (): GameStoreState => ({
   quizDailyCount: 0,
   quizDailyCountDateKey: "",
   quizDailyLimitEnabled: true,
+  refreshToken: null,
+  serverCharacterId: null,
   bgmVolume: DEFAULT_BGM_VOLUME,
   skippedMealCount: 0,
   sfxVolume: DEFAULT_SFX_VOLUME,
   studentId: "202101108",
   totalXp: 0,
+  userEmail: "",
+  userEmailVerified: false,
+  userId: null,
+  userImage: null,
+  userNickname: "김외대",
 });
 
 export const initialGameState: GameStoreState = createInitialGameState();
@@ -389,7 +434,15 @@ export const useGameStore = create<GameStore>()(
       },
       addFriend: (friend) =>
         set((state) => {
-          if (state.friendList.some((item) => item.id === friend.id)) {
+          if (
+            state.friendList.some(
+              (item) =>
+                item.id === friend.id ||
+                item.studentId === friend.studentId ||
+                (friend.serverFriendId !== undefined &&
+                  item.serverFriendId === friend.serverFriendId),
+            )
+          ) {
             return state;
           }
 
@@ -422,7 +475,79 @@ export const useGameStore = create<GameStore>()(
 
         return entry;
       },
+      applyServerMealFeed: ({ coin, mealSectionId, totalXp }) => {
+        const todayKey = getLocalDateKey();
+        const lastFedMealSlotIndex = mealSectionId
+          ? getMealSlotIndex(new Date(), mealSectionId)
+          : getLatestCompletedMealSlotIndex();
+
+        clearEatingTimeout();
+
+        set((state) => ({
+          appliedSkippedMealPenaltyCount: 0,
+          characterState: "eating",
+          coin: Math.max(coin, 0),
+          lastFedMealSlotIndex,
+          lastFedMeals: mealSectionId
+            ? {
+                ...state.lastFedMeals,
+                [mealSectionId]: todayKey,
+              }
+            : state.lastFedMeals,
+          pendingEvolution: createPendingEvolution({
+            currentPendingEvolution: state.pendingEvolution,
+            currentTotalXp: state.totalXp,
+            nextTotalXp: Math.max(totalXp, 0),
+            readyAt: Date.now() + EATING_DURATION_MS,
+            resumeState: state.characterState,
+            trigger: "meal",
+          }),
+          skippedMealCount: 0,
+          totalXp: Math.max(totalXp, 0),
+        }));
+
+        eatingTimeoutRef = setTimeout(() => {
+          eatingTimeoutRef = null;
+          get().syncMealStatus(false);
+        }, EATING_DURATION_MS);
+      },
+      applyServerQuizSubmit: ({ coin, quizId, totalXp }) => {
+        const attemptedAt = new Date();
+        const nextTotalXp = Math.max(totalXp, 0);
+
+        set((state) => ({
+          coin: Math.max(coin, 0),
+          pendingEvolution: createPendingEvolution({
+            currentPendingEvolution: state.pendingEvolution,
+            currentTotalXp: state.totalXp,
+            nextTotalXp,
+            resumeState: state.characterState,
+            trigger: "quiz",
+          }),
+          quizAttemptHistory: {
+            ...state.quizAttemptHistory,
+            [quizId]: attemptedAt.toISOString(),
+          },
+          quizDailyCount:
+            getQuizDailyCountForDate(
+              state.quizDailyCount,
+              state.quizDailyCountDateKey,
+              attemptedAt,
+            ) + 1,
+          quizDailyCountDateKey: getQuizLocalDateKey(attemptedAt),
+          totalXp: nextTotalXp,
+        }));
+      },
       clearPendingEvolution: () => set({ pendingEvolution: null }),
+      clearAuthSession: () => {
+        setBooApiAccessToken(null);
+
+        set({
+          accessToken: null,
+          autoLoginEnabled: false,
+          refreshToken: null,
+        });
+      },
       clearMealHistory: () => {
         clearEatingTimeout();
 
@@ -694,7 +819,28 @@ export const useGameStore = create<GameStore>()(
         };
       },
       setUserName: (userName) => set({ userName }),
-      setBooName: (booName) => set({ booName }),
+      setAuthSession: ({ accessToken, autoLoginEnabled, refreshToken }) => {
+        setBooApiAccessToken(accessToken);
+
+        set({
+          accessToken,
+          autoLoginEnabled,
+          refreshToken,
+        });
+      },
+      setBooName: (booName) => {
+        set({ booName });
+
+        const serverCharacterId = get().serverCharacterId;
+
+        if (serverCharacterId !== null) {
+          void updateCharacter(serverCharacterId, {
+            character_name: booName,
+          }).catch((error) => {
+            console.warn("서버 캐릭터 이름 동기화 실패", error);
+          });
+        }
+      },
       setCoin: (coin) => set({ coin: Math.max(coin, 0) }),
       setDeveloperModeEnabled: (developerModeEnabled) =>
         set({ developerModeEnabled }),
@@ -737,6 +883,7 @@ export const useGameStore = create<GameStore>()(
       setMealDayMode: (mealDayMode) => set({ mealDayMode }),
       setMealRestrictionEnabled: (mealRestrictionEnabled) =>
         set({ mealRestrictionEnabled }),
+      setServerCharacterId: (serverCharacterId) => set({ serverCharacterId }),
       setCharacterState: (characterState) => {
         if (characterState !== "eating") {
           clearEatingTimeout();
@@ -752,6 +899,8 @@ export const useGameStore = create<GameStore>()(
         })),
       setSfxVolume: (sfxVolume) => set({ sfxVolume: clampVolume(sfxVolume) }),
       setStudentId: (studentId) => set({ studentId }),
+      setUserEmail: (userEmail) => set({ userEmail }),
+      setUserNickname: (userNickname) => set({ userNickname }),
       setTotalXp: (totalXp) =>
         set((state) => {
           const nextTotalXp = Math.max(totalXp, 0);
@@ -784,9 +933,12 @@ export const useGameStore = create<GameStore>()(
         clearEatingTimeout();
         set({
           ...createInitialGameState(),
+          accessToken: get().accessToken,
+          autoLoginEnabled: get().autoLoginEnabled,
           bgmVolume: get().bgmVolume,
           developerModeEnabled: get().developerModeEnabled,
           masterVolume: get().masterVolume,
+          refreshToken: get().refreshToken,
           sfxVolume: get().sfxVolume,
         });
       },
@@ -795,7 +947,9 @@ export const useGameStore = create<GameStore>()(
       name: "boo-game-store",
       storage: createJSONStorage(resolvePersistStorage),
       partialize: (state) => ({
+        accessToken: state.autoLoginEnabled ? state.accessToken : null,
         appliedSkippedMealPenaltyCount: state.appliedSkippedMealPenaltyCount,
+        autoLoginEnabled: state.autoLoginEnabled,
         booName: state.booName,
         characterState: state.characterState,
         coin: state.coin,
@@ -805,9 +959,12 @@ export const useGameStore = create<GameStore>()(
         friendList: state.friendList,
         guestbookEntries: state.guestbookEntries,
         hasSeenGameTutorial: state.hasSeenGameTutorial,
+        heart: state.heart,
+        heartUpdatedAt: state.heartUpdatedAt,
         lastFedMeals: state.lastFedMeals,
         lastFedMealSlotIndex: state.lastFedMealSlotIndex,
         masterVolume: state.masterVolume,
+        maxHeart: state.maxHeart,
         mealDayMode: state.mealDayMode,
         mealRestrictionEnabled: state.mealRestrictionEnabled,
         ownedRoomItems: state.ownedRoomItems,
@@ -816,18 +973,36 @@ export const useGameStore = create<GameStore>()(
         quizDailyCount: state.quizDailyCount,
         quizDailyCountDateKey: state.quizDailyCountDateKey,
         quizDailyLimitEnabled: state.quizDailyLimitEnabled,
+        refreshToken: state.autoLoginEnabled ? state.refreshToken : null,
+        serverCharacterId: state.serverCharacterId,
         bgmVolume: state.bgmVolume,
         skippedMealCount: state.skippedMealCount,
         sfxVolume: state.sfxVolume,
         studentId: state.studentId,
         totalXp: state.totalXp,
+        userEmail: state.userEmail,
+        userEmailVerified: state.userEmailVerified,
+        userId: state.userId,
+        userImage: state.userImage,
         userName: state.userName,
+        userNickname: state.userNickname,
       }),
       onRehydrateStorage: () => (state) => {
         clearEatingTimeout();
 
         if (!state) {
           return;
+        }
+
+        if (state.autoLoginEnabled && state.accessToken) {
+          setBooApiAccessToken(state.accessToken);
+        } else {
+          setBooApiAccessToken(null);
+          state.setGameState({
+            accessToken: null,
+            autoLoginEnabled: false,
+            refreshToken: null,
+          });
         }
 
         const ownedRoomItems = new Set<RoomItemId>([
@@ -862,3 +1037,19 @@ export const useGameStore = create<GameStore>()(
     },
   ),
 );
+
+setBooApiTokenRefreshHandlers({
+  getRefreshToken: () => useGameStore.getState().refreshToken,
+  onRefreshFailure: () => {
+    useGameStore.getState().clearAuthSession();
+  },
+  onTokenRefresh: (token) => {
+    const { autoLoginEnabled, setAuthSession } = useGameStore.getState();
+
+    setAuthSession({
+      accessToken: token.access_token,
+      autoLoginEnabled,
+      refreshToken: token.refresh_token,
+    });
+  },
+});

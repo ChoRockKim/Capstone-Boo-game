@@ -1,7 +1,13 @@
 import CrossIcon from "@/assets/icons/cross.svg";
 import { colors } from "@/constants/colors";
 import { fonts } from "@/constants/fonts";
-import React, { useEffect, useState } from "react";
+import type { User } from "@/types";
+import {
+  getServerApiErrorMessage,
+  verifySignupEmail,
+} from "@/utils/serverApi";
+import React, { useContext, useEffect, useState } from "react";
+import { useFormContext } from "react-hook-form";
 import {
   Keyboard,
   LayoutAnimation,
@@ -13,6 +19,7 @@ import {
   View,
 } from "react-native";
 import EmailConfirmInput from "../Inputs/EmailConfirmInput";
+import { StepContext } from "./StepContext";
 
 interface RegisterProps {
   setIsRegisterOpen: (value: boolean) => void;
@@ -26,6 +33,36 @@ const KEYBOARD_HIDE_EVENT =
 
 const RegisterEmailConfirm = ({ setIsRegisterOpen }: RegisterProps) => {
   const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [isVerifyingEmail, setIsVerifyingEmail] = useState(false);
+  const { clearErrors, getValues, setError } = useFormContext<User>();
+  const { setStep } = useContext(StepContext);
+
+  const handleEmailConfirmSubmit = async () => {
+    if (isVerifyingEmail) {
+      return;
+    }
+
+    setIsVerifyingEmail(true);
+    clearErrors("emailConfirm");
+
+    try {
+      await verifySignupEmail({
+        code: getValues("emailConfirm").trim(),
+        email: getValues("email").trim(),
+      });
+      setStep(2);
+    } catch (error) {
+      setError("emailConfirm", {
+        message: getServerApiErrorMessage(
+          error,
+          "인증번호 확인에 실패했어요.",
+        ),
+        type: "server",
+      });
+    } finally {
+      setIsVerifyingEmail(false);
+    }
+  };
 
   useEffect(() => {
     const show = Keyboard.addListener(KEYBOARD_SHOW_EVENT, (e) => {
@@ -60,11 +97,13 @@ const RegisterEmailConfirm = ({ setIsRegisterOpen }: RegisterProps) => {
           </View>
           <View style={styles.mainContainer}>
             <Text style={styles.mainText}>
-              이메일로 전송된 {"\n"}인증번호를 입력해주세요
+              {isVerifyingEmail
+                ? "인증번호를 확인하고 있어요"
+                : "이메일로 전송된 \n인증번호를 입력해주세요"}
             </Text>
           </View>
           {/* 입력 필드 */}
-          <EmailConfirmInput />
+          <EmailConfirmInput onValidSubmit={handleEmailConfirmSubmit} />
         </View>
       </View>
     </TouchableWithoutFeedback>

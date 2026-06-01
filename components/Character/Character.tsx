@@ -4,6 +4,7 @@
  * @used-by      app/game/index.tsx, components/Room/RoomMiniBoo.tsx
  * @side-effects interval timer 관리, 이미지 표시 완료 콜백 호출
  */
+/* eslint-disable react-hooks/set-state-in-effect -- Character image state is synchronized from the incoming animation state prop. */
 import {
   CHARACTER_IMAGES,
   CharacterGrade,

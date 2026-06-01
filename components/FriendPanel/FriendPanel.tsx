@@ -3,10 +3,13 @@ import UserAdd from "@/assets/icons/user-add.svg";
 import { colors } from "@/constants/colors";
 import { fonts } from "@/constants/fonts";
 import { useGameStore } from "@/stores/useGameStore";
+import { listFriends } from "@/utils/serverApi";
+import { mapFriendOutToFriendListItem } from "@/utils/serverFriendAdapter";
 import { playSoundEffect } from "@/utils/soundEffects";
 import { Feather } from "@expo/vector-icons";
+import { useQuery } from "@tanstack/react-query";
 import { router } from "expo-router";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { FlatList, Pressable, StyleSheet, Text, View } from "react-native";
 import { FriendListItem } from "../FriendList/FriendListDummyData";
 import FriendAddModal from "./FriendAddModal";
@@ -20,23 +23,34 @@ const INITIAL_VISIBLE_COUNT = 5;
 const PAGE_SIZE = 5;
 
 const FriendPanel = ({ setIsFriendOpen }: FriendPanelProps) => {
+  const accessToken = useGameStore((state) => state.accessToken);
   const friendList = useGameStore((state) => state.friendList);
   const [isFriendAddOpen, setIsFriendAddOpen] = useState(false);
   const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_COUNT);
+  const { data: serverFriends, refetch: refetchServerFriends } = useQuery({
+    queryKey: ["friends", accessToken],
+    queryFn: () => listFriends(accessToken ?? undefined),
+    enabled: !!accessToken,
+    staleTime: 1000 * 30,
+    retry: 1,
+  });
+  const displayFriendList = useMemo(
+    () =>
+      accessToken
+        ? (serverFriends?.map(mapFriendOutToFriendListItem) ?? [])
+        : friendList,
+    [accessToken, friendList, serverFriends],
+  );
+  const clampedVisibleCount = Math.min(
+    visibleCount,
+    Math.max(displayFriendList.length, INITIAL_VISIBLE_COUNT),
+  );
 
   const visibleFriends = useMemo(
-    () => friendList.slice(0, visibleCount),
-    [friendList, visibleCount],
+    () => displayFriendList.slice(0, clampedVisibleCount),
+    [clampedVisibleCount, displayFriendList],
   );
-  const hasMoreFriends = visibleCount < friendList.length;
-
-  useEffect(() => {
-    if (friendList.length === 0) {
-      return;
-    }
-
-    setVisibleCount((prev) => Math.min(prev, friendList.length));
-  }, [friendList.length]);
+  const hasMoreFriends = clampedVisibleCount < displayFriendList.length;
 
   const handleClosePress = () => {
     playSoundEffect("basicClick");
@@ -50,14 +64,20 @@ const FriendPanel = ({ setIsFriendOpen }: FriendPanelProps) => {
 
   const handleLoadMorePress = () => {
     playSoundEffect("basicClick");
-    setVisibleCount((prev) => Math.min(prev + PAGE_SIZE, friendList.length));
+    setVisibleCount((prev) =>
+      Math.min(prev + PAGE_SIZE, displayFriendList.length),
+    );
   };
 
   const handleVisitRoomPress = (friend: FriendListItem) => {
     setIsFriendOpen(false);
     router.push({
       pathname: "/room/[friendId]",
-      params: { friendId: friend.id },
+      params: {
+        friendId: friend.id,
+        friendName: friend.name,
+        friendUserId: friend.serverUserId?.toString(),
+      },
     });
   };
 
@@ -135,7 +155,12 @@ const FriendPanel = ({ setIsFriendOpen }: FriendPanelProps) => {
         ) : null}
       </View>
       {isFriendAddOpen ? (
-        <FriendAddModal onClose={() => setIsFriendAddOpen(false)} />
+        <FriendAddModal
+          onClose={() => setIsFriendAddOpen(false)}
+          onFriendChanged={() => {
+            void refetchServerFriends();
+          }}
+        />
       ) : null}
     </View>
   );

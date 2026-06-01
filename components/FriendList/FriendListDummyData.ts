@@ -18,10 +18,13 @@ export type FriendMiniGameDifficulty = "normal" | "hard" | "infinite";
 
 export interface FriendListItem {
   id: string;
+  image?: string | null;
   miniGameScores?: Partial<FriendMiniGameScores>;
   miniGameHardScores?: Partial<FriendMiniGameScores>;
   name: string;
   roomSnapshot?: FriendRoomSnapshot;
+  serverFriendId?: number;
+  serverUserId?: number;
   studentId: string;
 }
 

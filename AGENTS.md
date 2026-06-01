@@ -148,11 +148,23 @@
   - 전공책 받기 무한모드는 시간 제한이 없고 방해물 3회 충돌 시 종료됩니다. 점수 아이템을 먹을 때마다 낙하 속도/스폰 속도가 1%씩 빨라지며 최대 1.8배까지 증가합니다.
   - 전공책 받기 무한모드 라우트 param은 `mode=infinite`입니다. 기존 `mode=hard`는 호환 alias로 처리하며, 친구 랭킹 데이터는 기존 `miniGameHardScores`를 재사용합니다.
   - 전공책 받기 인게임 화면은 iOS 좌->우 swipe back gesture를 비활성화합니다.
-  - 하트는 더미 상태 기반이며 최대 5개, 회복 간격은 `MINI_GAME_HEART_RECOVERY_MS = 30분`입니다.
-  - 친구 랭킹 점수는 `components/FriendList/FriendListDummyData.ts`의 `miniGameScores`/`miniGameHardScores`를 사용합니다.
+  - 하트는 서버 유저 데이터(`heart`, `max_heart`, `heart_updated_at`)와 동기화합니다. 비로그인/서버 데이터 부재 시에는 로컬 fallback으로 계산합니다.
+  - 로그인 상태에서는 더미 친구 점수 기반 미니게임 랭킹을 표시하지 않습니다. 현재 백엔드에는 전체 랭킹 목록 API가 없어 랭킹 목록은 서버 API 추가가 필요합니다.
 - 학식 API:
   - `utils/getTodayMeal.ts`에서 `https://hufs-clock-api.vercel.app/api/data`를 axios로 요청합니다.
   - 응답 메뉴는 `TodayMealSection[]`으로 정규화됩니다.
+- 서버 API:
+  - 서버 Swagger UI는 `https://capstonedesign-production.up.railway.app/docs`입니다.
+  - 원본 OpenAPI 스키마는 `docs/api/openapi.json`에 저장되어 있습니다.
+  - 사람이 읽기 쉬운 요약, 연결 우선순위, 백엔드 README 기반 정책 메모는 `docs/api/server-api-summary.md`를 참고하세요.
+  - Base URL은 `https://capstonedesign-production.up.railway.app`입니다.
+  - 인증이 필요한 API는 로그인 응답의 `access_token`을 `Authorization: Bearer <access_token>` 헤더로 전달하는 구조입니다.
+  - `refresh_token`은 `/user/refresh` 토큰 재발급과 `/user/logout` 토큰 폐기에 사용합니다.
+  - 로그인 ID는 이메일이 아니라 9자리 학번이며, 회원가입 이메일은 `@hufs.ac.kr` 도메인으로 제한됩니다.
+  - 로컬 백엔드는 별도 DB 설정이 없으면 `boo_app.db` SQLite를 사용하고, Railway 배포는 `DATABASE_URL` PostgreSQL 연결 문자열이 필요합니다.
+  - 이메일 인증/비밀번호 재설정은 SMTP 환경변수(`SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL`, `SMTP_FROM_NAME`, `SMTP_USE_TLS`)에 의존합니다.
+  - 현재 연결 우선순위는 인증/유저 -> 학식 -> 퀴즈 -> 친구 -> 마이룸/상점 -> 미니게임/경제 상태입니다.
+  - 서버 응답 필드는 snake_case가 많으므로 UI/store에는 직접 흘리지 말고 API adapter/mapper에서 camelCase로 변환하는 방식을 우선합니다.
 - 사운드:
   - BGM은 `main`, `myRoom`, `titleLogin`, `miniGameMain`, `miniGameIngame` 트랙으로 관리됩니다.
   - BGM 기본 볼륨은 이전 대비 약 70% 수준으로 낮춰져 있습니다.
@@ -160,6 +172,9 @@
 
 ## 주의사항
 - `.env.example` 또는 `.env*` 파일은 현재 확인되지 않았습니다. 환경변수 정책은 확인 필요.
+- 서버 연동 작업 전에는 `docs/api/openapi.json`과 `docs/api/server-api-summary.md`를 먼저 확인하세요. Swagger와 실제 서버 동작이 다를 수 있는 엔드포인트는 작은 호출로 검증한 뒤 UI에 연결하세요.
+- `/economy/minigame/play`는 Swagger상 request body가 없습니다. 미니게임 하트 차감/보상 흐름 연결 전 백엔드 동작 확인이 필요합니다.
+- `/minigames/ranking/me`는 Swagger상 game type/mode query parameter가 없습니다. 게임별/모드별 랭킹이 필요하면 백엔드 확인이 필요합니다.
 - Node 26/Homebrew Node로 실행하면 Expo/Metro나 optional native dependency가 불안정할 수 있습니다. 개발 서버와 설치는 Node 20 환경에서 실행하세요.
 - `README.md`는 Expo 기본 템플릿 내용입니다. 프로젝트 실제 설명은 `docs/technical-learning-guide.md`가 더 상세합니다.
 - `ios/`, `android/` native 폴더가 존재합니다. Expo config/app.json으로 관리되는 설정과 직접 수정한 native 설정이 섞일 수 있으므로 prebuild 전후 변경사항을 확인해야 합니다.
@@ -185,6 +200,31 @@
 - 테스트 자동화 script는 확인되지 않았습니다. 확인 필요.
 
 ## 현재 작업 중인 기능
+
+### 서버 API 전환 진행상황
+- 인증/회원가입/이메일 인증/로그인/로그아웃/토큰 갱신은 `utils/serverApi.ts`와 `useGameStore` 인증 세션으로 연결되어 있습니다.
+- 로그인 후 `syncServerUserStats` / `useSyncServerUserStatsOnFocus`로 코인, 하트, XP, 유저 기본 정보를 서버 값과 동기화합니다.
+- 퀴즈는 로그인 상태에서 서버 `/quizzes/play-status`, `/quizzes/next`, `/quizzes/submit`을 우선 사용합니다. 비로그인 상태에서만 로컬 `QuizData` fallback을 사용합니다.
+- 학식 먹이기 패널은 서버 `/school-foods/today`, `/school-foods/feed-status`, `/school-foods/feed`를 사용합니다. 로그인 상태에서 서버 음식 id가 없으면 로컬 `feedBoo()`로 fallback하지 않도록 막았습니다.
+- 부 말풍선용 오늘 학식은 Boo 백엔드가 아니라 `https://hufs-clock-api.vercel.app/api/data` 크롤링 API를 사용합니다. 해당 API의 `meals[].menus[]`는 요일별 배열이므로 `월=0, 화=1, 수=2, 목=3, 금=4` 인덱스의 메뉴만 오늘 메뉴로 사용합니다.
+- 친구 목록/친구 관리 화면은 로그인 상태에서 서버 `/friends/` 결과만 표시합니다. 서버 응답 전/실패 시 더미 친구 목록을 보여주지 않도록 정리했습니다.
+- 친구 추가/삭제는 서버 API를 우선 사용합니다. 비로그인 상태에서만 `FriendListDummyData` 기반 로컬 fallback을 사용합니다.
+- 마이룸 상점 구매는 서버 구매 성공 후 로컬 구매 함수를 다시 호출하지 않도록 수정했습니다. 서버가 내려준 `coin`으로 동기화하고, 로컬 owned/equipped 상태만 맞춥니다.
+- 방명록 목록은 서버 `/rooms/{user_id}/guestbook` 결과를 표시합니다. 서버 데이터가 없을 때 더미 방명록이 뜨지 않도록 기본값을 빈 배열로 바꿨습니다.
+- 친구 방 방문은 서버 친구의 `serverUserId`를 라우트 param으로 넘기고 `/rooms/{user_id}` 조회 결과를 로컬 룸 에셋 id로 매핑해 렌더링합니다.
+- 미니게임 플레이 결과 저장과 성공 보상은 서버 `/minigames/results`, `/economy/minigame/play`을 사용합니다. 로그인 상태에서 더미 친구 점수로 현재 랭킹을 계산하지 않습니다.
+
+### 남은 서버/더미 정리 작업
+- 전체 미니게임 랭킹 목록 API가 필요합니다. 현재 서버에는 `/minigames/ranking/me`만 확인되어 있어 친구/전체 랭킹 리스트를 실제 서버 데이터로 표시할 수 없습니다.
+- `/minigames/ranking/me`는 Swagger상 game type/mode query parameter가 없습니다. 전공책 받기/부 잡기/무한모드별 랭킹 분리가 필요한지 백엔드 확인이 필요합니다.
+- 퀴즈 플레이 가능 타이밍이 로컬 상태와 서버 `/quizzes/play-status` 기준 사이에서 어긋날 수 있습니다. 로그인 상태에서는 남은 횟수/쿨타임/다음 가능 시각을 서버 응답만 단일 기준으로 삼고, 로컬 `lastQuizAttemptAt`/`quizAttemptsToday`는 비로그인 fallback 또는 서버 동기화 보조값으로만 제한해야 합니다.
+- 자동 로그인 상태에서 앱 시작 후 메인화면으로 넘어가는 초기 진입이 느립니다. 저장된 세션 복원, refresh token 갱신, `/user/me`/경제 상태/이미지 preload가 직렬로 묶여 있는지 확인하고, 화면 진입에 필수인 작업과 백그라운드 동기화로 미룰 작업을 분리해야 합니다.
+- 친구 방 서버 조회는 현재 서버 `RoomView`에 캐릭터 이름/XP/상태가 없어 방 가구/벽지만 서버 값으로 매핑하고, 부 이름/XP/상태는 fallback을 사용합니다. 백엔드가 캐릭터 정보를 같이 내려주면 매핑을 확장해야 합니다.
+- 마이룸 내 방(`/rooms/me`) 조회 결과를 앱 시작/마이룸 진입 시 로컬 `equippedRoomItems`, `equippedRoomWallpaper`, owned 목록에 반영하는 동기화가 아직 제한적입니다. 현재는 상점 목록과 구매/장착 흐름 중심으로 맞춰져 있습니다.
+- 서버 shop item 이름/image와 로컬 `RoomData` id/label 매칭은 문자열 normalize 기반입니다. 백엔드 item key를 로컬 asset id와 1:1로 내려주면 매칭 안정성이 좋아집니다.
+- 더미 파일 자체(`FriendListDummyData`, `RoomGuestbookDummyData`, 로컬 `MealMenuData`, 로컬 `QuizData`)는 비로그인/개발 fallback 용도로 남아 있습니다. 실제 배포에서 비로그인 플레이를 허용하지 않을 경우 제거 범위를 다시 결정해야 합니다.
+- 기존 사용자 AsyncStorage에 저장된 `friendList` 더미 값은 persist 때문에 남아 있을 수 있습니다. 로그인 상태 화면에서는 더미를 표시하지 않도록 막았지만, 필요하면 마이그레이션으로 persisted `friendList` 정리가 필요합니다.
+- 친구 방명록 작성은 서버 요청을 보내고 로컬 fallback 추가는 비로그인일 때만 수행하도록 정리했습니다. 작성 성공 후 방명록 목록 refetch는 아직 연결되지 않았습니다.
 
 ## Dependency Layers
 실제 import를 기준으로 보면 현재 핵심 흐름은 아래 방향입니다.

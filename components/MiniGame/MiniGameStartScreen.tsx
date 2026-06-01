@@ -6,6 +6,7 @@
  */
 import ArrowBackIcon from "@/assets/icons/arrow-back-return.svg";
 import TrophyIcon from "@/assets/icons/trophy.svg";
+import { CHARACTER_IMAGES } from "@/constants/character";
 import CoinBox from "@/components/CoinBox/CoinBox";
 import BookCatchRuleModal from "@/components/MiniGame/BookCatchRuleModal";
 import BooCatchRuleModal from "@/components/MiniGame/BooCatchRuleModal";
@@ -17,6 +18,7 @@ import {
   getMiniGameHeartStatus,
   MINI_GAME_START_SCREEN_REGISTRY,
   preloadMiniGameBooCatchRuleImageAssets,
+  preloadMiniGameBookCatchImageAssets,
 } from "@/components/MiniGame/MiniGameData";
 import type { MiniGameId } from "@/components/MiniGame/MiniGameData";
 import MiniGameRankingModal, {
@@ -28,7 +30,9 @@ import TopAlert from "@/components/TopAlert/TopAlert";
 import { colors } from "@/constants/colors";
 import { fonts } from "@/constants/fonts";
 import { useGameStore } from "@/stores/useGameStore";
+import { useSyncServerUserStatsOnFocus } from "@/useHook/useSyncServerUserStatsOnFocus";
 import { startBackgroundMusicSession } from "@/utils/backgroundMusic";
+import { getXpProgressInfo } from "@/utils/xpProgress";
 import { Image } from "expo-image";
 import { router, useFocusEffect } from "expo-router";
 import { StatusBar } from "expo-status-bar";
@@ -51,10 +55,16 @@ type TopAlertState = {
 
 const MiniGameStartScreen = ({ miniGameId }: MiniGameStartScreenProps) => {
   const { width } = useWindowDimensions();
+  useSyncServerUserStatsOnFocus();
   const miniGame = MINI_GAME_START_SCREEN_REGISTRY[miniGameId];
   const coin = useGameStore((state) => state.coin);
   const friendList = useGameStore((state) => state.friendList);
-  const studentId = useGameStore((state) => state.studentId);
+  const heart = useGameStore((state) => state.heart);
+  const heartUpdatedAt = useGameStore((state) => state.heartUpdatedAt);
+  const maxHeart = useGameStore((state) => state.maxHeart);
+  const totalXp = useGameStore((state) => state.totalXp);
+  const xpProgress = useMemo(() => getXpProgressInfo(totalXp), [totalXp]);
+  const bookCatchBooImage = CHARACTER_IMAGES.grades[xpProgress.grade].basic1;
   const [topAlert, setTopAlert] = useState<TopAlertState>({
     autoHideDuration: 1800,
     id: 0,
@@ -68,12 +78,17 @@ const MiniGameStartScreen = ({ miniGameId }: MiniGameStartScreenProps) => {
   const [isInfiniteMode, setIsInfiniteMode] = useState(false);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [fallbackRecoveryStartedAtMs] = useState(() => Date.now());
+  const accessToken = useGameStore((state) => state.accessToken);
 
   const actionButtonWidth = useMemo(() => {
     return Math.min(170, Math.floor((width - 56 - 12) / 2));
   }, [width]);
 
   const rankingEntries = useMemo<MiniGameRankingEntry[]>(() => {
+    if (accessToken) {
+      return [];
+    }
+
     return friendList.map((friend) => ({
       friendId: friend.id,
       name: friend.name,
@@ -83,12 +98,20 @@ const MiniGameStartScreen = ({ miniGameId }: MiniGameStartScreenProps) => {
         isInfiniteMode ? "infinite" : "normal",
       ),
     }));
-  }, [friendList, isInfiniteMode, miniGame.id]);
+  }, [accessToken, friendList, isInfiniteMode, miniGame.id]);
 
   const heartStatus = useMemo(
     () =>
-      getMiniGameHeartStatus(studentId, nowMs, fallbackRecoveryStartedAtMs),
-    [fallbackRecoveryStartedAtMs, nowMs, studentId],
+      getMiniGameHeartStatus(
+        {
+          heartCount: heart,
+          heartRecoveryStartedAt: heartUpdatedAt,
+          maxHeartCount: maxHeart,
+        },
+        nowMs,
+        fallbackRecoveryStartedAtMs,
+      ),
+    [fallbackRecoveryStartedAtMs, heart, heartUpdatedAt, maxHeart, nowMs],
   );
 
   const heartStatusLabel = heartStatus.isFull
@@ -117,12 +140,18 @@ const MiniGameStartScreen = ({ miniGameId }: MiniGameStartScreenProps) => {
   }, [heartStatus.isFull]);
 
   useEffect(() => {
-    if (miniGame.id !== "catchBoo") {
+    if (miniGame.id === "catchTheMajor") {
+      void Promise.all([
+        preloadMiniGameBookCatchImageAssets(),
+        Image.loadAsync(bookCatchBooImage),
+      ]);
       return;
     }
 
-    void preloadMiniGameBooCatchRuleImageAssets();
-  }, [miniGame.id]);
+    if (miniGame.id === "catchBoo") {
+      void preloadMiniGameBooCatchRuleImageAssets();
+    }
+  }, [bookCatchBooImage, miniGame.id]);
 
   const showTopAlert = useCallback(
     (

@@ -16,6 +16,7 @@ export interface MealMenuItem {
   image: number;
   name: string;
   price: number;
+  schoolFoodId?: number;
 }
 
 export interface MealSection {

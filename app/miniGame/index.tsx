@@ -26,6 +26,7 @@ import TopAlert from "@/components/TopAlert/TopAlert";
 import { colors } from "@/constants/colors";
 import { fonts } from "@/constants/fonts";
 import { useGameStore } from "@/stores/useGameStore";
+import { useSyncServerUserStatsOnFocus } from "@/useHook/useSyncServerUserStatsOnFocus";
 import { startBackgroundMusicSession } from "@/utils/backgroundMusic";
 import { playSoundEffect } from "@/utils/soundEffects";
 import { getXpProgressInfo } from "@/utils/xpProgress";
@@ -57,6 +58,7 @@ type TopAlertState = {
 
 export default function MiniGameIndex() {
   const insets = useSafeAreaInsets();
+  useSyncServerUserStatsOnFocus();
   const [isOptionOpen, setIsOptionOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isFriendOpen, setIsFriendOpen] = useState(false);

@@ -11,15 +11,31 @@ import {
 } from "@/components/FriendList/FriendListDummyData";
 import ProgressBar from "@/components/ProgressBar/ProgressBar";
 import GuestbookModal from "@/components/Room/GuestbookModal";
-import { ROOM_CANVAS_ASPECT_RATIO } from "@/components/Room/RoomData";
+import {
+  DEFAULT_EQUIPPED_ROOM_ITEMS,
+  DEFAULT_EQUIPPED_ROOM_WALLPAPER,
+  ROOM_CANVAS_ASPECT_RATIO,
+  ROOM_ITEM_ASSETS,
+  ROOM_WALLPAPER_ASSETS,
+  RoomItemId,
+  RoomSlotId,
+  RoomWallpaperId,
+} from "@/components/Room/RoomData";
 import RoomScene from "@/components/Room/RoomScene";
 import SquareButton from "@/components/SquareButton/SquareButton";
 import { colors } from "@/constants/colors";
 import { fonts } from "@/constants/fonts";
 import { useGameStore } from "@/stores/useGameStore";
 import { startBackgroundMusicSession } from "@/utils/backgroundMusic";
+import {
+  createRoomGuestbook,
+  getServerApiErrorMessage,
+  getUserRoom,
+  RoomView,
+} from "@/utils/serverApi";
 import { playSoundEffect } from "@/utils/soundEffects";
 import { getXpProgressInfo } from "@/utils/xpProgress";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useCallback, useMemo, useState } from "react";
@@ -33,15 +49,119 @@ const ROOM_MAX_WIDTH = 600;
 const PROGRESS_BOTTOM_OFFSET = 38;
 const ROOM_VERTICAL_RESERVED_SPACE = 220;
 
+const normalizeServerRoomItemKey = (value: string) =>
+  value.toLowerCase().replace(/[\s_-]/g, "");
+
+const getLocalRoomItemIdFromServerItem = (
+  serverItem: RoomView["equipped_items"][number]["item"],
+  slotId: RoomSlotId,
+): RoomItemId | null => {
+  const serverNameKey = normalizeServerRoomItemKey(serverItem.name);
+  const serverImageKey = serverItem.image
+    ? normalizeServerRoomItemKey(serverItem.image)
+    : "";
+
+  const matchedEntry = Object.entries(ROOM_ITEM_ASSETS).find(
+    ([itemId, item]) => {
+      if (item.slotId !== slotId) {
+        return false;
+      }
+
+      const itemIdKey = normalizeServerRoomItemKey(itemId);
+      const labelKey = normalizeServerRoomItemKey(item.label);
+
+      return (
+        serverNameKey === itemIdKey ||
+        serverNameKey === labelKey ||
+        serverImageKey.includes(itemIdKey)
+      );
+    },
+  );
+
+  return matchedEntry ? (matchedEntry[0] as RoomItemId) : null;
+};
+
+const getLocalWallpaperIdFromServerItem = (
+  serverItem: RoomView["equipped_items"][number]["item"],
+): RoomWallpaperId | null => {
+  const serverNameKey = normalizeServerRoomItemKey(serverItem.name);
+  const serverImageKey = serverItem.image
+    ? normalizeServerRoomItemKey(serverItem.image)
+    : "";
+
+  const matchedEntry = Object.entries(ROOM_WALLPAPER_ASSETS).find(
+    ([wallpaperId, wallpaper]) => {
+      const wallpaperIdKey = normalizeServerRoomItemKey(wallpaperId);
+      const labelKey = normalizeServerRoomItemKey(wallpaper.label);
+
+      return (
+        serverNameKey === wallpaperIdKey ||
+        serverNameKey === labelKey ||
+        serverImageKey.includes(wallpaperIdKey)
+      );
+    },
+  );
+
+  return matchedEntry ? (matchedEntry[0] as RoomWallpaperId) : null;
+};
+
+const mapServerRoomViewToSnapshot = (
+  roomView: RoomView,
+  fallbackBooName: string,
+) => {
+  const equippedRoomItems = { ...DEFAULT_EQUIPPED_ROOM_ITEMS };
+  let equippedRoomWallpaper = DEFAULT_EQUIPPED_ROOM_WALLPAPER;
+
+  roomView.equipped_items.forEach((equippedItem) => {
+    if (equippedItem.item_type === "wallpaper") {
+      equippedRoomWallpaper =
+        getLocalWallpaperIdFromServerItem(equippedItem.item) ??
+        equippedRoomWallpaper;
+      return;
+    }
+
+    if (
+      equippedItem.item_type === "bed" ||
+      equippedItem.item_type === "closet" ||
+      equippedItem.item_type === "table"
+    ) {
+      const slotId = equippedItem.item_type;
+      equippedRoomItems[slotId] =
+        getLocalRoomItemIdFromServerItem(equippedItem.item, slotId) ??
+        equippedRoomItems[slotId];
+    }
+  });
+
+  return {
+    booName: fallbackBooName,
+    characterState: "basic1" as const,
+    equippedRoomItems,
+    equippedRoomWallpaper,
+    totalXp: 0,
+  };
+};
+
 const FriendRoomIndex = () => {
   const insets = useSafeAreaInsets();
   const { height, width } = useWindowDimensions();
-  const params = useLocalSearchParams<{ friendId?: string | string[] }>();
+  const params = useLocalSearchParams<{
+    friendId?: string | string[];
+    friendName?: string | string[];
+    friendUserId?: string | string[];
+  }>();
   const friendId = Array.isArray(params.friendId)
     ? params.friendId[0]
     : params.friendId;
+  const friendNameParam = Array.isArray(params.friendName)
+    ? params.friendName[0]
+    : params.friendName;
+  const friendUserIdParam = Array.isArray(params.friendUserId)
+    ? params.friendUserId[0]
+    : params.friendUserId;
+  const accessToken = useGameStore((state) => state.accessToken);
   const addGuestbookEntry = useGameStore((state) => state.addGuestbookEntry);
   const friendList = useGameStore((state) => state.friendList);
+  const queryClient = useQueryClient();
   const [isGuestbookOpen, setIsGuestbookOpen] = useState(false);
 
   const friend = useMemo(
@@ -51,7 +171,27 @@ const FriendRoomIndex = () => {
       null,
     [friendId, friendList],
   );
-  const roomSnapshot = friend ? getFriendRoomSnapshot(friend) : null;
+  const parsedFriendUserId = Number(friendUserIdParam);
+  const serverUserIdFromFriendId =
+    friendId?.startsWith("server-user-") ? Number(friendId.slice(12)) : NaN;
+  const serverUserId =
+    friend?.serverUserId ??
+    (Number.isFinite(parsedFriendUserId) ? parsedFriendUserId : null) ??
+    (Number.isFinite(serverUserIdFromFriendId) ? serverUserIdFromFriendId : null);
+  const { data: serverRoom } = useQuery({
+    queryKey: ["rooms", serverUserId, accessToken],
+    queryFn: () => getUserRoom(serverUserId ?? 0, accessToken ?? undefined),
+    enabled: !!accessToken && serverUserId !== null,
+    staleTime: 1000 * 30,
+    retry: 1,
+  });
+  const fallbackFriendName = friend?.name ?? friendNameParam ?? "친구";
+  const displayFriendName = serverRoom?.owner.nickname ?? fallbackFriendName;
+  const roomSnapshot = serverRoom
+    ? mapServerRoomViewToSnapshot(serverRoom, `${displayFriendName}의 부`)
+    : friend && !accessToken
+      ? getFriendRoomSnapshot(friend)
+      : null;
   const xpProgress = useMemo(
     () => getXpProgressInfo(roomSnapshot?.totalXp ?? 0),
     [roomSnapshot?.totalXp],
@@ -82,8 +222,24 @@ const FriendRoomIndex = () => {
     setIsGuestbookOpen(true);
   };
 
-  const handleGuestbookSubmit = (message: string) => {
+  const handleGuestbookSubmit = async (message: string) => {
     if (!friendId) {
+      return;
+    }
+
+    if (accessToken && serverUserId !== null) {
+      try {
+        await createRoomGuestbook(serverUserId, message, accessToken);
+        await queryClient.invalidateQueries({
+          queryKey: ["rooms", serverUserId, "guestbook"],
+        });
+      } catch (error) {
+        const message = getServerApiErrorMessage(error, "방명록 작성 실패");
+
+        console.warn("서버 방명록 작성 실패", message);
+        throw new Error(message);
+      }
+
       return;
     }
 
@@ -102,7 +258,7 @@ const FriendRoomIndex = () => {
           />
           <View style={styles.friendNameBox}>
             <Text style={styles.friendNameText}>
-              {friend ? `${friend.name}의 방` : "친구 방"}
+              {`${displayFriendName}의 방`}
             </Text>
           </View>
         </View>
@@ -114,6 +270,7 @@ const FriendRoomIndex = () => {
                 characterState={roomSnapshot.characterState}
                 equippedRoomItems={roomSnapshot.equippedRoomItems}
                 grade={xpProgress.grade}
+                miniBooGrabbable
                 onFurniturePress={{
                   table: handleTablePress,
                 }}
@@ -133,7 +290,11 @@ const FriendRoomIndex = () => {
           </>
         ) : (
           <View style={styles.emptyContainer}>
-            <Text style={styles.emptyText}>친구 방 정보를 찾을 수 없어요.</Text>
+            <Text style={styles.emptyText}>
+              {accessToken && serverUserId !== null
+                ? "친구 방 정보를 불러오고 있어요."
+                : "친구 방 정보를 찾을 수 없어요."}
+            </Text>
           </View>
         )}
       </SafeAreaView>

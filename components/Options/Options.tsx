@@ -7,8 +7,9 @@ import UserCircleIcon from "@/assets/icons/User-circle.svg";
 import { colors } from "@/constants/colors";
 import { fonts } from "@/constants/fonts";
 import { useGameStore } from "@/stores/useGameStore";
+import { logoutUser } from "@/utils/serverApi";
 import { router } from "expo-router";
-import React from "react";
+import React, { useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import OptionButton from "./OptionButton";
 
@@ -25,12 +26,38 @@ const Options = ({
   setIsProfileOpen,
   setIsSoundSettingsOpen,
 }: OptionsType) => {
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const refreshToken = useGameStore((state) => state.refreshToken);
+  const clearAuthSession = useGameStore((state) => state.clearAuthSession);
   const developerModeEnabled = useGameStore(
     (state) => state.developerModeEnabled,
   );
+  const resetGameState = useGameStore((state) => state.resetGameState);
   const toggleDeveloperModeEnabled = useGameStore(
     (state) => state.toggleDeveloperModeEnabled,
   );
+
+  const handleLogoutPress = async () => {
+    if (isLoggingOut) {
+      return;
+    }
+
+    setIsLoggingOut(true);
+
+    try {
+      if (refreshToken) {
+        await logoutUser(refreshToken);
+      }
+    } catch (error) {
+      console.warn("로그아웃 API 요청 실패. 로컬 세션을 정리합니다.", error);
+    } finally {
+      clearAuthSession();
+      resetGameState();
+      setIsOptionOpen(false);
+      router.replace("/");
+      setIsLoggingOut(false);
+    }
+  };
 
   return (
     <View style={styles.container}>
@@ -106,7 +133,8 @@ const Options = ({
           label="알림"
         />
         <OptionButton
-          onPress={() => router.replace("/")}
+          disabled={isLoggingOut}
+          onPress={handleLogoutPress}
           icon={(pressed) => (
             <ArrowOutsideIcon
               width={20}
@@ -116,7 +144,7 @@ const Options = ({
               }
             />
           )}
-          label="로그아웃"
+          label={isLoggingOut ? "로그아웃 중" : "로그아웃"}
         />
       </View>
       <View style={styles.developerSection}>

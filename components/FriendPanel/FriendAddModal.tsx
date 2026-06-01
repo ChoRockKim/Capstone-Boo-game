@@ -9,6 +9,15 @@ import {
   getFriendByStudentId,
 } from "@/components/FriendList/FriendListDummyData";
 import { useGameStore } from "@/stores/useGameStore";
+import {
+  addServerFriend,
+  getServerApiErrorMessage,
+  searchFriendByStudentId,
+} from "@/utils/serverApi";
+import {
+  mapFriendOutToFriendListItem,
+  mapFriendUserToFriendListItem,
+} from "@/utils/serverFriendAdapter";
 import { playSoundEffect } from "@/utils/soundEffects";
 import React, { useEffect, useMemo, useState } from "react";
 import {
@@ -26,6 +35,7 @@ type FriendAddModalStep = "input" | "result" | "success";
 
 interface FriendAddModalProps {
   onClose: () => void;
+  onFriendChanged?: () => void;
 }
 
 const BASE_HEIGHT_BY_STEP: Record<FriendAddModalStep, number> = {
@@ -38,12 +48,15 @@ const KEYBOARD_SHOW_EVENT =
 const KEYBOARD_HIDE_EVENT =
   Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
 
-const FriendAddModal = ({ onClose }: FriendAddModalProps) => {
+const FriendAddModal = ({ onClose, onFriendChanged }: FriendAddModalProps) => {
+  const accessToken = useGameStore((state) => state.accessToken);
   const addFriend = useGameStore((state) => state.addFriend);
   const friendList = useGameStore((state) => state.friendList);
   const myStudentId = useGameStore((state) => state.studentId);
   const [errorMessage, setErrorMessage] = useState("");
   const [friendAddStep, setFriendAddStep] = useState<FriendAddModalStep>("input");
+  const [isAddingFriend, setIsAddingFriend] = useState(false);
+  const [isLookingUp, setIsLookingUp] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [lookupResult, setLookupResult] = useState<FriendListItem | null>(null);
   const [studentIdInput, setStudentIdInput] = useState("");
@@ -75,18 +88,58 @@ const FriendAddModal = ({ onClose }: FriendAddModalProps) => {
     onClose();
   };
 
-  const handleLookup = () => {
-    const foundFriend = getFriendByStudentId(trimmedStudentId);
-
+  const validateStudentIdInput = () => {
     if (!trimmedStudentId) {
       setErrorMessage("학번을 입력해주세요");
-      return;
+      return false;
     }
 
     if (trimmedStudentId === myStudentId) {
       setErrorMessage("본인은 친구로 추가할 수 없어요.");
+      return false;
+    }
+
+    return true;
+  };
+
+  const handleLookup = async () => {
+    if (!validateStudentIdInput()) {
       return;
     }
+
+    if (accessToken) {
+      setIsLookingUp(true);
+
+      try {
+        const foundFriend = mapFriendUserToFriendListItem(
+          await searchFriendByStudentId(trimmedStudentId, accessToken),
+        );
+
+        if (
+          friendList.some(
+            (friend) => friend.studentId === foundFriend.studentId,
+          )
+        ) {
+          setErrorMessage("이미 친구로 등록되어 있어요.");
+          return;
+        }
+
+        Keyboard.dismiss();
+        setErrorMessage("");
+        setLookupResult(foundFriend);
+        setFriendAddStep("result");
+      } catch (error) {
+        setErrorMessage(
+          getServerApiErrorMessage(error, "해당 학번의 친구를 찾을 수 없어요."),
+        );
+      } finally {
+        setIsLookingUp(false);
+      }
+
+      return;
+    }
+
+    const foundFriend = getFriendByStudentId(trimmedStudentId);
 
     if (!foundFriend) {
       setErrorMessage("해당 학번의 친구를 찾을 수 없어요.");
@@ -104,12 +157,35 @@ const FriendAddModal = ({ onClose }: FriendAddModalProps) => {
     setFriendAddStep("result");
   };
 
-  const handleAddFriend = () => {
+  const handleAddFriend = async () => {
     if (!lookupResult) {
       return;
     }
 
     playSoundEffect("basicClick");
+
+    if (accessToken) {
+      setIsAddingFriend(true);
+
+      try {
+        const addedFriend = mapFriendOutToFriendListItem(
+          await addServerFriend(lookupResult.studentId, accessToken),
+        );
+
+        addFriend(addedFriend);
+        onFriendChanged?.();
+        setFriendAddStep("success");
+      } catch (error) {
+        setErrorMessage(
+          getServerApiErrorMessage(error, "친구 추가에 실패했어요."),
+        );
+      } finally {
+        setIsAddingFriend(false);
+      }
+
+      return;
+    }
+
     addFriend(lookupResult);
     setFriendAddStep("success");
   };
@@ -158,7 +234,7 @@ const FriendAddModal = ({ onClose }: FriendAddModalProps) => {
             <MainButton
               color="blue"
               height={64}
-              label="친구 추가"
+              label={isAddingFriend ? "추가 중" : "친구 추가"}
               onPress={handleAddFriend}
               size="S"
               width={280}
@@ -187,7 +263,7 @@ const FriendAddModal = ({ onClose }: FriendAddModalProps) => {
           <MainButton
             color="blue"
             height={64}
-            label="친구 조회"
+            label={isLookingUp ? "조회 중" : "친구 조회"}
             onPress={handleLookup}
             size="S"
             width={280}

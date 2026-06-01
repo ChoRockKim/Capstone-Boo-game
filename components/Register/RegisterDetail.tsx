@@ -1,7 +1,11 @@
 import CrossIcon from "@/assets/icons/cross.svg";
 import { colors } from "@/constants/colors";
 import { fonts } from "@/constants/fonts";
-import { User } from "@/types";
+import type { User } from "@/types";
+import {
+  createUser,
+  getServerApiErrorMessage,
+} from "@/utils/serverApi";
 import React, { useContext, useEffect, useState } from "react";
 import { useFormContext } from "react-hook-form";
 import {
@@ -37,14 +41,38 @@ const KEYBOARD_HIDE_EVENT =
 const RegisterDetail = ({ setIsRegisterOpen }: RegisterProps) => {
   const { width } = useWindowDimensions();
   const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [isCreatingUser, setIsCreatingUser] = useState(false);
   const buttonWidth = width - 56;
   const { setStep } = useContext(StepContext);
-  const { clearErrors, handleSubmit, setFocus } = useFormContext<User>();
+  const { clearErrors, handleSubmit, setError, setFocus } =
+    useFormContext<User>();
 
-  const onSubmit = (value: User) => {
-    //유저 회원가입 응답 성공 로직
-    console.log("회원가입 정보:", value);
-    setStep(3);
+  const onSubmit = async (value: User) => {
+    if (isCreatingUser) {
+      return;
+    }
+
+    setIsCreatingUser(true);
+
+    try {
+      const createdUser = await createUser({
+        email: value.email.trim(),
+        name: value.name.trim(),
+        nickname: value.nickName.trim(),
+        password: value.password,
+        student_id: value.studentId.trim(),
+      });
+
+      console.log("회원가입 완료:", createdUser);
+      setStep(3);
+    } catch (error) {
+      setError("studentId", {
+        message: getServerApiErrorMessage(error, "회원가입에 실패했어요."),
+        type: "server",
+      });
+    } finally {
+      setIsCreatingUser(false);
+    }
   };
   const onError = () => {
     console.log("다 확인을 안 하셨네요;");
@@ -96,7 +124,9 @@ const RegisterDetail = ({ setIsRegisterOpen }: RegisterProps) => {
               </Pressable>
             </View>
             <View style={styles.mainContainer}>
-              <Text style={styles.mainText}>정보를 입력해주세요</Text>
+              <Text style={styles.mainText}>
+                {isCreatingUser ? "회원가입을 완료하고 있어요" : "정보를 입력해주세요"}
+              </Text>
             </View>
             {/* 입력 필드 */}
             <StudentIdInput />
@@ -105,7 +135,6 @@ const RegisterDetail = ({ setIsRegisterOpen }: RegisterProps) => {
                 required: "비밀번호를 입력해주세요.",
                 validate: (v) =>
                   /^(?=.*[A-Za-z])(?=.*\d).{8,}$/.test(String(v)) ||
-                  true ||
                   "비밀번호는 8자 이상, 영문과 숫자를 포함해야 합니다",
               }}
               onValidSubmit={() => {
@@ -120,7 +149,7 @@ const RegisterDetail = ({ setIsRegisterOpen }: RegisterProps) => {
               <MainButton
                 onPress={handleSubmit(onSubmit, onError)}
                 size="S"
-                label="완료"
+                label={isCreatingUser ? "요청 중" : "완료"}
                 width={buttonWidth}
               />
             </View>

@@ -3,9 +3,17 @@ import CrossIcon from "@/assets/icons/cross.svg";
 import { colors } from "@/constants/colors";
 import { fonts } from "@/constants/fonts";
 import { useGameStore } from "@/stores/useGameStore";
+import {
+  deleteServerFriend,
+  FriendOut,
+  getServerApiErrorMessage,
+  listFriends,
+} from "@/utils/serverApi";
+import { mapFriendOutToFriendListItem } from "@/utils/serverFriendAdapter";
 import { playSoundEffect } from "@/utils/soundEffects";
 import { Feather } from "@expo/vector-icons";
-import React, { useEffect, useMemo, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import React, { useMemo, useState } from "react";
 import { FlatList, Pressable, StyleSheet, Text, View } from "react-native";
 import FriendDeleteModal from "./FriendDeleteModal";
 import FriendListButton from "./FriendListButton";
@@ -27,26 +35,39 @@ const FriendList = ({
   setIsFriendListOpen,
   setIsOptionOpen,
 }: FriendListProps) => {
+  const accessToken = useGameStore((state) => state.accessToken);
   const friendList = useGameStore((state) => state.friendList);
   const removeFriend = useGameStore((state) => state.removeFriend);
+  const queryClient = useQueryClient();
+  const [deleteErrorMessage, setDeleteErrorMessage] = useState("");
   const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_COUNT);
   const [deleteModalState, setDeleteModalState] = useState<DeleteModalState>(
     null,
   );
+  const { data: serverFriends, refetch: refetchServerFriends } = useQuery({
+    queryKey: ["friends", accessToken],
+    queryFn: () => listFriends(accessToken ?? undefined),
+    enabled: !!accessToken,
+    staleTime: 1000 * 30,
+    retry: 1,
+  });
+  const displayFriendList = useMemo(
+    () =>
+      accessToken
+        ? (serverFriends?.map(mapFriendOutToFriendListItem) ?? [])
+        : friendList,
+    [accessToken, friendList, serverFriends],
+  );
+  const clampedVisibleCount = Math.min(
+    visibleCount,
+    Math.max(displayFriendList.length, INITIAL_VISIBLE_COUNT),
+  );
 
   const visibleFriends = useMemo(
-    () => friendList.slice(0, visibleCount),
-    [friendList, visibleCount],
+    () => displayFriendList.slice(0, clampedVisibleCount),
+    [clampedVisibleCount, displayFriendList],
   );
-  const hasMoreFriends = visibleCount < friendList.length;
-
-  useEffect(() => {
-    if (friendList.length === 0) {
-      return;
-    }
-
-    setVisibleCount((prev) => Math.min(prev, friendList.length));
-  }, [friendList.length]);
+  const hasMoreFriends = clampedVisibleCount < displayFriendList.length;
 
   const handleClosePress = () => {
     playSoundEffect("basicClick");
@@ -61,10 +82,13 @@ const FriendList = ({
 
   const handleLoadMorePress = () => {
     playSoundEffect("basicClick");
-    setVisibleCount((prev) => Math.min(prev + PAGE_SIZE, friendList.length));
+    setVisibleCount((prev) =>
+      Math.min(prev + PAGE_SIZE, displayFriendList.length),
+    );
   };
 
   const handleDeletePress = (friend: FriendListItem) => {
+    setDeleteErrorMessage("");
     setDeleteModalState({
       friendId: friend.id,
       friendName: friend.name,
@@ -76,8 +100,49 @@ const FriendList = ({
     setDeleteModalState(null);
   };
 
-  const handleConfirmDelete = () => {
+  const handleConfirmDelete = async () => {
     if (!deleteModalState) {
+      return;
+    }
+
+    const targetFriend = displayFriendList.find(
+      (friend) => friend.id === deleteModalState.friendId,
+    );
+
+    if (accessToken && targetFriend?.serverFriendId !== undefined) {
+      const friendsQueryKey = ["friends", accessToken] as const;
+      const previousServerFriends =
+        queryClient.getQueryData<FriendOut[]>(friendsQueryKey);
+
+      setDeleteErrorMessage("");
+      await queryClient.cancelQueries({ queryKey: friendsQueryKey });
+      queryClient.setQueryData<FriendOut[]>(friendsQueryKey, (currentFriends) =>
+        currentFriends?.filter(
+          (friend) => friend.friend_id !== targetFriend.serverFriendId,
+        ),
+      );
+      setDeleteModalState({
+        friendId: deleteModalState.friendId,
+        friendName: deleteModalState.friendName,
+        mode: "success",
+      });
+
+      try {
+        await deleteServerFriend(targetFriend.serverFriendId, accessToken);
+        void refetchServerFriends();
+      } catch (error) {
+        queryClient.setQueryData(friendsQueryKey, previousServerFriends);
+        setDeleteErrorMessage(
+          getServerApiErrorMessage(error, "친구 삭제에 실패했어요."),
+        );
+        setDeleteModalState({
+          friendId: deleteModalState.friendId,
+          friendName: deleteModalState.friendName,
+          mode: "confirm",
+        });
+        return;
+      }
+
       return;
     }
 
@@ -161,6 +226,7 @@ const FriendList = ({
       </View>
       {deleteModalState ? (
         <FriendDeleteModal
+          errorMessage={deleteErrorMessage}
           friendName={deleteModalState.friendName}
           mode={deleteModalState.mode}
           onClose={handleDeleteModalClose}

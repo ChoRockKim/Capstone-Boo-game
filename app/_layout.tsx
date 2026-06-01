@@ -99,22 +99,16 @@ export default function RootLayout() {
     <QueryClientProvider client={queryClient}>
       <SafeAreaProvider>
         <NavigationBar hidden />
-        <Stack screenOptions={{ headerShown: false }}>
+        <Stack screenOptions={{ gestureEnabled: false, headerShown: false }}>
           <Stack.Screen name="index" />
           <Stack.Screen name="game/index" />
           <Stack.Screen name="room/index" />
           <Stack.Screen name="room/[friendId]" />
           <Stack.Screen name="miniGame/index" />
           <Stack.Screen name="miniGame/catchTheMajor" />
-          <Stack.Screen
-            name="miniGame/catchTheMajorPlay"
-            options={{ gestureEnabled: false }}
-          />
+          <Stack.Screen name="miniGame/catchTheMajorPlay" />
           <Stack.Screen name="miniGame/catchBoo" />
-          <Stack.Screen
-            name="miniGame/catchBooPlay"
-            options={{ gestureEnabled: false }}
-          />
+          <Stack.Screen name="miniGame/catchBooPlay" />
           <Stack.Screen name="miniGame/freeThrow" />
         </Stack>
       </SafeAreaProvider>

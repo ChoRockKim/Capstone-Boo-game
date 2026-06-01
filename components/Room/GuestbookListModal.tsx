@@ -6,10 +6,7 @@
  */
 import CrossIcon from "@/assets/icons/cross.svg";
 import EditSquareIcon from "@/assets/icons/edit-square.svg";
-import {
-  ROOM_GUESTBOOK_DUMMY_ENTRIES,
-  RoomGuestbookListEntry,
-} from "@/components/Room/RoomGuestbookDummyData";
+import { RoomGuestbookListEntry } from "@/components/Room/RoomGuestbookDummyData";
 import { colors } from "@/constants/colors";
 import { fonts } from "@/constants/fonts";
 import { playSoundEffect } from "@/utils/soundEffects";
@@ -26,7 +23,7 @@ interface GuestbookListModalProps {
 const INITIAL_VISIBLE_ENTRY_COUNT = 4;
 
 const GuestbookListModal = ({
-  entries = ROOM_GUESTBOOK_DUMMY_ENTRIES,
+  entries = [],
   onClose,
 }: GuestbookListModalProps) => {
   const [guestbookEntries, setGuestbookEntries] = useState(entries);

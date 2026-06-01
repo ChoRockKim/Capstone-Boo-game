@@ -7,7 +7,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { getTodayMeal, TodayMealSection } from "@/utils/getTodayMeal";
 
-const TODAY_MEAL_QUERY_KEY = ["todayMeal"] as const;
+const TODAY_MEAL_QUERY_KEY = ["todayMeal", "crawler-v3"] as const;
 
 interface UseTodayMealResult {
   error: string | null;
@@ -19,9 +19,10 @@ interface UseTodayMealResult {
 export const useTodayMeal = (): UseTodayMealResult => {
   const { data, error, isLoading, refetch } = useQuery({
     queryKey: TODAY_MEAL_QUERY_KEY,
-    queryFn: getTodayMeal,
+    queryFn: () => getTodayMeal(),
     staleTime: 1000 * 60 * 10,
     gcTime: 1000 * 60 * 30,
+    refetchOnMount: "always",
     retry: 1,
   });
 

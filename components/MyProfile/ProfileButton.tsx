@@ -60,7 +60,10 @@ const ProfileButton = ({
             <View style={styles.rightContainer}>
               {accessoryNode}
               {value ? (
-                <Text style={[styles.valueText, { color: valueColor }]}>
+                <Text
+                  numberOfLines={1}
+                  style={[styles.valueText, { color: valueColor }]}
+                >
                   {value}
                 </Text>
               ) : null}
@@ -111,6 +114,7 @@ const styles = StyleSheet.create({
     includeFontPadding: false,
   },
   rightContainer: {
+    flex: 1.4,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "flex-end",
@@ -118,9 +122,11 @@ const styles = StyleSheet.create({
     marginLeft: 12,
   },
   valueText: {
+    flexShrink: 1,
     fontFamily: fonts.BASIC,
     fontSize: 20,
     includeFontPadding: false,
+    textAlign: "right",
   },
 });
 

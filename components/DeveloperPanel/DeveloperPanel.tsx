@@ -4,6 +4,7 @@
  * @used-by      app/game/index.tsx
  * @side-effects 다수의 Zustand 디버그 액션 호출, 입력 validation 상태 관리
  */
+/* eslint-disable react-hooks/set-state-in-effect -- Debug form inputs intentionally mirror current store values when they change. */
 import CrossIcon from "@/assets/icons/cross.svg";
 import MainButton from "@/components/MainButton/MainButton";
 import { MealDayMode } from "@/components/MealPanel/MealMenuData";

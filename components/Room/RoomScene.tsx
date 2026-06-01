@@ -31,6 +31,7 @@ interface RoomSceneProps {
   characterState: CharacterState;
   equippedRoomItems: EquippedRoomItems;
   grade: CharacterGrade;
+  miniBooGrabbable?: boolean;
   onFurniturePress?: Partial<Record<keyof EquippedRoomItems, () => void>>;
   roomHeight: number;
   roomWidth: number;
@@ -44,6 +45,7 @@ const RoomScene = ({
   characterState,
   equippedRoomItems,
   grade,
+  miniBooGrabbable = false,
   onFurniturePress,
   roomHeight,
   roomWidth,
@@ -53,6 +55,47 @@ const RoomScene = ({
   const wallpaper =
     ROOM_WALLPAPER_ASSETS[wallpaperId] ??
     ROOM_WALLPAPER_ASSETS[DEFAULT_EQUIPPED_ROOM_WALLPAPER];
+  const renderedRoomItems = ROOM_SLOT_ORDER.map((slotId) => {
+    const itemId =
+      equippedRoomItems[slotId] ?? DEFAULT_EQUIPPED_ROOM_ITEMS[slotId];
+    const item =
+      ROOM_ITEM_ASSETS[itemId] ??
+      ROOM_ITEM_ASSETS[DEFAULT_EQUIPPED_ROOM_ITEMS[slotId]];
+    const layout = DEFAULT_ROOM_LAYOUT[slotId];
+    const handleFurniturePress = onFurniturePress?.[slotId];
+    const isPurchasedBed = slotId === "bed" && item.price > 0;
+    const isPurchasedCloset = slotId === "closet" && item.price > 0;
+    const isPurchasedTable = slotId === "table" && item.price > 0;
+    const itemWidth =
+      layout.width *
+      (item.widthScale ?? 1) *
+      (isPurchasedTable ? PURCHASED_TABLE_SIZE_SCALE : 1) *
+      (isPurchasedCloset ? PURCHASED_CLOSET_SIZE_SCALE : 1) *
+      (isPurchasedBed ? PURCHASED_BED_SIZE_SCALE : 1);
+    const itemOffset = isPurchasedTable
+      ? PURCHASED_TABLE_OFFSET
+      : isPurchasedCloset
+        ? PURCHASED_CLOSET_OFFSET
+        : isPurchasedBed
+          ? PURCHASED_BED_OFFSET
+          : { x: 0, y: 0 };
+    const itemX = layout.x + (layout.width - itemWidth) / 2 + itemOffset.x;
+    const itemY = layout.y + itemOffset.y;
+    const itemPositionStyle = {
+      aspectRatio: item.aspectRatio,
+      left: toPercent((itemX / ROOM_CANVAS_WIDTH) * 100),
+      top: toPercent((itemY / ROOM_CANVAS_HEIGHT) * 100),
+      width: toPercent((itemWidth / ROOM_CANVAS_WIDTH) * 100),
+      zIndex: layout.zIndex,
+    };
+
+    return {
+      handleFurniturePress,
+      item,
+      itemPositionStyle,
+      slotId,
+    };
+  });
 
   return (
     <View style={[styles.roomCanvas, { height: roomHeight, width: roomWidth }]}>
@@ -62,40 +105,7 @@ const RoomScene = ({
         source={wallpaper.image}
         style={styles.roomBackground}
       />
-      {ROOM_SLOT_ORDER.map((slotId) => {
-        const itemId =
-          equippedRoomItems[slotId] ?? DEFAULT_EQUIPPED_ROOM_ITEMS[slotId];
-        const item =
-          ROOM_ITEM_ASSETS[itemId] ??
-          ROOM_ITEM_ASSETS[DEFAULT_EQUIPPED_ROOM_ITEMS[slotId]];
-        const layout = DEFAULT_ROOM_LAYOUT[slotId];
-        const handleFurniturePress = onFurniturePress?.[slotId];
-        const isPurchasedBed = slotId === "bed" && item.price > 0;
-        const isPurchasedCloset = slotId === "closet" && item.price > 0;
-        const isPurchasedTable = slotId === "table" && item.price > 0;
-        const itemWidth =
-          layout.width *
-          (item.widthScale ?? 1) *
-          (isPurchasedTable ? PURCHASED_TABLE_SIZE_SCALE : 1) *
-          (isPurchasedCloset ? PURCHASED_CLOSET_SIZE_SCALE : 1) *
-          (isPurchasedBed ? PURCHASED_BED_SIZE_SCALE : 1);
-        const itemOffset = isPurchasedTable
-          ? PURCHASED_TABLE_OFFSET
-          : isPurchasedCloset
-            ? PURCHASED_CLOSET_OFFSET
-            : isPurchasedBed
-              ? PURCHASED_BED_OFFSET
-              : { x: 0, y: 0 };
-        const itemX = layout.x + (layout.width - itemWidth) / 2 + itemOffset.x;
-        const itemY = layout.y + itemOffset.y;
-        const itemPositionStyle = {
-          aspectRatio: item.aspectRatio,
-          left: toPercent((itemX / ROOM_CANVAS_WIDTH) * 100),
-          top: toPercent((itemY / ROOM_CANVAS_HEIGHT) * 100),
-          width: toPercent((itemWidth / ROOM_CANVAS_WIDTH) * 100),
-          zIndex: layout.zIndex,
-        };
-
+      {renderedRoomItems.map(({ handleFurniturePress, item, itemPositionStyle, slotId }) => {
         if (handleFurniturePress) {
           return (
             <Pressable
@@ -131,6 +141,7 @@ const RoomScene = ({
       {showMiniBoo ? (
         <RoomMiniBoo
           grade={grade}
+          grabbable={miniBooGrabbable}
           roomHeight={roomHeight}
           roomWidth={roomWidth}
           state={characterState}

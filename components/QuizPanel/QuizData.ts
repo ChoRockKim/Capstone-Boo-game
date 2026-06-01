@@ -15,6 +15,7 @@ type QuizQuestionBase = {
   id: string;
   question: string;
   resultText: string;
+  serverQuizId?: number;
 };
 
 export type MultipleChoiceQuizQuestion = QuizQuestionBase & {
