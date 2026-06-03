@@ -20,6 +20,7 @@ import { CHARACTER_IMAGES } from "@/constants/character";
 import { colors } from "@/constants/colors";
 import { fonts } from "@/constants/fonts";
 import { useGameStore } from "@/stores/useGameStore";
+import { useRequirePlayableSession } from "@/useHook/useRequirePlayableSession";
 import { startBackgroundMusicSession } from "@/utils/backgroundMusic";
 import {
   createMiniGameResult,
@@ -338,6 +339,7 @@ const BookCatchFallingItem = memo(
 BookCatchFallingItem.displayName = "BookCatchFallingItem";
 
 const CatchTheMajorPlayScreen = () => {
+  const canPlayMiniGame = useRequirePlayableSession();
   const { mode } = useLocalSearchParams<{ mode?: string }>();
   const difficulty: BookCatchDifficulty =
     mode === "infinite" || mode === "hard" ? "infinite" : "normal";
@@ -345,6 +347,9 @@ const CatchTheMajorPlayScreen = () => {
   const difficultyConfig = BOOK_CATCH_DIFFICULTY_CONFIG[difficulty];
   const accessToken = useGameStore((state) => state.accessToken);
   const adjustCoin = useGameStore((state) => state.adjustCoin);
+  const consumeMiniGameHeart = useGameStore(
+    (state) => state.consumeMiniGameHeart,
+  );
   const friendList = useGameStore((state) => state.friendList);
   const setGameState = useGameStore((state) => state.setGameState);
   const totalXp = useGameStore((state) => state.totalXp);
@@ -468,7 +473,7 @@ const CatchTheMajorPlayScreen = () => {
   }, [booImage, difficulty]);
 
   useEffect(() => {
-    if (!hasGameArea || gamePhase !== "preparing") {
+    if (!canPlayMiniGame || !hasGameArea || gamePhase !== "preparing") {
       return;
     }
 
@@ -499,6 +504,7 @@ const CatchTheMajorPlayScreen = () => {
   }, [
     booLaneSharedValue,
     booTranslateX,
+    canPlayMiniGame,
     difficulty,
     gamePhase,
     getLaneLeft,
@@ -509,16 +515,32 @@ const CatchTheMajorPlayScreen = () => {
   ]);
 
   useEffect(() => {
-    if (!hasGameArea || !areAssetsReady || gamePhase !== "preparing") {
+    if (
+      !canPlayMiniGame ||
+      !hasGameArea ||
+      !areAssetsReady ||
+      gamePhase !== "preparing"
+    ) {
+      return;
+    }
+
+    if (!consumeMiniGameHeart()) {
+      router.replace("/miniGame/catchTheMajor");
       return;
     }
 
     setCountdownValue(3);
     setGamePhase("countdown");
-  }, [areAssetsReady, gamePhase, hasGameArea]);
+  }, [
+    areAssetsReady,
+    canPlayMiniGame,
+    consumeMiniGameHeart,
+    gamePhase,
+    hasGameArea,
+  ]);
 
   useEffect(() => {
-    if (gamePhase !== "countdown") {
+    if (!canPlayMiniGame || gamePhase !== "countdown") {
       return;
     }
 
@@ -540,7 +562,7 @@ const CatchTheMajorPlayScreen = () => {
     return () => {
       clearInterval(countdownTimer);
     };
-  }, [gamePhase]);
+  }, [canPlayMiniGame, gamePhase]);
 
   useEffect(() => {
     if (gamePhase !== "playing" || !hasGameArea) {
@@ -910,6 +932,11 @@ const CatchTheMajorPlayScreen = () => {
   };
 
   const handleRestartPress = () => {
+    if (!consumeMiniGameHeart()) {
+      router.replace("/miniGame/catchTheMajor");
+      return;
+    }
+
     resetRoundState();
     setCountdownValue(3);
     setGamePhase("countdown");

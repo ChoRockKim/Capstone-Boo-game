@@ -7,10 +7,12 @@
 /* eslint-disable react-hooks/refs, react-hooks/set-state-in-effect -- This route orchestrates timers, loading gates, overlays, and persisted refs. */
 import ball from "@/assets/icons/ball.svg";
 import cap from "@/assets/icons/cap.svg";
+import crown from "@/assets/icons/crown.svg";
 import home from "@/assets/icons/home.svg";
 import meal from "@/assets/icons/meal.svg";
 import setting from "@/assets/icons/setting.svg";
 import user from "@/assets/icons/users-multiple.svg";
+import AchievementPanel from "@/components/AchievementPanel/AchievementPanel";
 import BooChat from "@/components/BooChat/BooChat";
 import {
   getEvolutionBooChat,
@@ -35,6 +37,7 @@ import { preloadMiniGamePlaceCriticalImageAssets } from "@/components/MiniGame/M
 import {
   formatMealCountdown,
   getMealAvailabilityStatus,
+  normalizeMealSectionId,
   PLATE_IMAGE_ASSETS,
 } from "@/components/MealPanel/MealMenuData";
 import MealPanel from "@/components/MealPanel/MealPanel";
@@ -66,6 +69,7 @@ import { colors } from "@/constants/colors";
 import { fonts } from "@/constants/fonts";
 import type { PendingEvolution } from "@/stores/useGameStore";
 import { useGameStore } from "@/stores/useGameStore";
+import { useRequirePlayableSession } from "@/useHook/useRequirePlayableSession";
 import { useSyncServerUserStatsOnFocus } from "@/useHook/useSyncServerUserStatsOnFocus";
 import { useTodayMeal } from "@/useHook/useTodayMeal";
 import {
@@ -82,7 +86,10 @@ import {
   preloadImageAssets,
   type PreloadableImageAsset,
 } from "@/utils/preloadImageAssets";
-import { getQuizPlayStatus } from "@/utils/serverApi";
+import {
+  getQuizPlayStatus,
+  getSchoolFoodFeedStatus,
+} from "@/utils/serverApi";
 import { playSoundEffect } from "@/utils/soundEffects";
 import { getRequiredXpForGrade, getXpProgressInfo } from "@/utils/xpProgress";
 import { useQuery } from "@tanstack/react-query";
@@ -217,6 +224,7 @@ type TopAlertState = {
 
 export default function Index() {
   const insets = useSafeAreaInsets();
+  useRequirePlayableSession();
   useSyncServerUserStatsOnFocus();
   const booChatTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const quizCorrectHappyTimeoutRef = useRef<ReturnType<
@@ -237,6 +245,7 @@ export default function Index() {
   const shouldUseMinimumGameLoadingRef = useRef(
     !hasPreloadedGameCriticalImageAssets,
   );
+  const quizCooldownRefetchKeyRef = useRef<string | null>(null);
   const todayMealSectionsRef = useRef<TodayMealSection[]>([]);
   const [isOptionOpen, setIsOptionOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
@@ -246,6 +255,7 @@ export default function Index() {
   const [isMealOpen, setIsMealOpen] = useState(false);
   const [isQuizOpen, setIsQuizOpen] = useState(false);
   const [isTutorialOpen, setIsTutorialOpen] = useState(false);
+  const [isAchievementOpen, setIsAchievementOpen] = useState(false);
   const [isDeveloperPanelOpen, setIsDeveloperPanelOpen] = useState(false);
   const [isMiniGameLoading, setIsMiniGameLoading] = useState(false);
   const [isBackgroundReady, setIsBackgroundReady] = useState(
@@ -334,10 +344,67 @@ export default function Index() {
   const isEvolutionBusy =
     !!activeEvolution ||
     (!!pendingEvolution && pendingEvolution.trigger !== "quiz");
-  const mealAvailability = getMealAvailabilityStatus(
-    mealNow,
-    lastFedMeals,
-    mealRestrictionEnabled,
+  const localMealAvailability = useMemo(
+    () =>
+      getMealAvailabilityStatus(
+        mealNow,
+        lastFedMeals,
+        mealRestrictionEnabled,
+      ),
+    [lastFedMeals, mealNow, mealRestrictionEnabled],
+  );
+  const { data: serverMealFeedStatus, isLoading: isServerMealFeedLoading } =
+    useQuery({
+      queryKey: ["schoolFoods", "feedStatus", accessToken],
+      queryFn: () => getSchoolFoodFeedStatus(accessToken ?? undefined),
+      enabled: !!accessToken,
+      staleTime: 1000 * 30,
+      gcTime: 1000 * 60 * 5,
+      retry: 1,
+    });
+  const serverActiveMealSectionId = normalizeMealSectionId(
+    serverMealFeedStatus?.current_slot,
+  );
+  const serverFedMealSectionIds = useMemo(
+    () =>
+      new Set(
+        serverMealFeedStatus?.fed_slots
+          .map((slot) => normalizeMealSectionId(slot))
+          .filter((slot) => slot !== null) ?? [],
+      ),
+    [serverMealFeedStatus?.fed_slots],
+  );
+  const serverHasFedCurrentMeal =
+    !!serverActiveMealSectionId &&
+    serverFedMealSectionIds.has(serverActiveMealSectionId);
+  const mealAvailability = useMemo(
+    () =>
+      accessToken
+        ? {
+            ...localMealAvailability,
+            activeMealSectionId:
+              serverActiveMealSectionId ??
+              localMealAvailability.activeMealSectionId,
+            canFeedNow:
+              !mealRestrictionEnabled ||
+              (!isServerMealFeedLoading &&
+                serverMealFeedStatus?.can_feed_now === true),
+            hasFedCurrentMeal: serverHasFedCurrentMeal,
+            shouldShowCountdown:
+              mealRestrictionEnabled &&
+              !isServerMealFeedLoading &&
+              serverMealFeedStatus?.can_feed_now !== true,
+          }
+        : localMealAvailability,
+    [
+      accessToken,
+      isServerMealFeedLoading,
+      localMealAvailability,
+      mealRestrictionEnabled,
+      serverActiveMealSectionId,
+      serverHasFedCurrentMeal,
+      serverMealFeedStatus?.can_feed_now,
+    ],
   );
   const isMealButtonDisabled =
     mealRestrictionEnabled && !mealAvailability.canFeedNow;
@@ -345,8 +412,11 @@ export default function Index() {
     ? formatMealCountdown(mealAvailability.nextMeal.startsAt, mealNow)
     : "";
   const isServerQuizEnabled = !!accessToken;
-  const { data: serverQuizStatus, isLoading: isServerQuizStatusLoading } =
-    useQuery({
+  const {
+    data: serverQuizStatus,
+    isLoading: isServerQuizStatusLoading,
+    refetch: refetchServerQuizStatus,
+  } = useQuery({
       queryKey: ["quizzes", "playStatus", accessToken],
       queryFn: () => getQuizPlayStatus(accessToken ?? undefined),
       enabled: isServerQuizEnabled,
@@ -373,14 +443,27 @@ export default function Index() {
         : null,
     [mealNow, quizAttemptHistory, quizDailyLimitEnabled],
   );
-  const serverQuizNextAvailableAt = serverQuizStatus?.next_available_at
-    ? new Date(serverQuizStatus.next_available_at)
-    : null;
+  const serverQuizNextAvailableAtValue =
+    serverQuizStatus?.next_available_at ?? null;
+  const serverQuizNextAvailableAt = useMemo(
+    () =>
+      serverQuizNextAvailableAtValue
+        ? new Date(serverQuizNextAvailableAtValue)
+        : null,
+    [serverQuizNextAvailableAtValue],
+  );
   const isServerQuizDailyLimitReached =
     isServerQuizEnabled && (serverQuizStatus?.remaining_today ?? 1) <= 0;
+  const isServerQuizCooldownExpired =
+    isServerQuizEnabled &&
+    !isServerQuizDailyLimitReached &&
+    !!serverQuizNextAvailableAt &&
+    serverQuizNextAvailableAt.getTime() <= mealNow.getTime();
   const isServerQuizUnavailable =
     isServerQuizEnabled &&
-    (isServerQuizStatusLoading || serverQuizStatus?.can_play_now !== true);
+    (isServerQuizStatusLoading ||
+      (serverQuizStatus?.can_play_now !== true &&
+        !isServerQuizCooldownExpired));
   const isLocalQuizDailyLimitReached =
     quizDailyLimitEnabled && localQuizCountToday >= QUIZ_DAILY_LIMIT;
   const isLocalQuizCooldownLocked =
@@ -395,13 +478,18 @@ export default function Index() {
     : isLocalQuizCooldownLocked;
   const isQuizButtonDisabled = isQuizDailyLimitReached || isQuizCooldownLocked;
   const nextQuizUnlockAt = isServerQuizEnabled
-    ? (serverQuizNextAvailableAt ??
-      (isServerQuizDailyLimitReached ? getNextQuizDailyResetAt(mealNow) : null))
+    ? isServerQuizDailyLimitReached
+      ? getNextQuizDailyResetAt(mealNow)
+      : isServerQuizCooldownExpired
+        ? null
+        : serverQuizNextAvailableAt
     : isQuizDailyLimitReached
       ? getNextQuizDailyResetAt(mealNow)
       : localNextQuizAvailableAt;
   const quizCountdownText =
-    isQuizButtonDisabled && nextQuizUnlockAt
+    isQuizButtonDisabled &&
+    nextQuizUnlockAt &&
+    nextQuizUnlockAt.getTime() > mealNow.getTime()
       ? formatMealCountdown(nextQuizUnlockAt, mealNow)
       : "";
 
@@ -460,6 +548,37 @@ export default function Index() {
   }, []);
 
   useEffect(() => {
+    if (!isServerQuizEnabled || !serverQuizNextAvailableAt) {
+      quizCooldownRefetchKeyRef.current = null;
+      return;
+    }
+
+    if (serverQuizStatus?.can_play_now === true) {
+      quizCooldownRefetchKeyRef.current = null;
+      return;
+    }
+
+    if (!isServerQuizCooldownExpired) {
+      return;
+    }
+
+    const refetchKey = serverQuizNextAvailableAt.toISOString();
+
+    if (quizCooldownRefetchKeyRef.current === refetchKey) {
+      return;
+    }
+
+    quizCooldownRefetchKeyRef.current = refetchKey;
+    void refetchServerQuizStatus();
+  }, [
+    isServerQuizCooldownExpired,
+    isServerQuizEnabled,
+    refetchServerQuizStatus,
+    serverQuizNextAvailableAt,
+    serverQuizStatus?.can_play_now,
+  ]);
+
+  useEffect(() => {
     return () => {
       if (booChatTimeoutRef.current) {
         clearTimeout(booChatTimeoutRef.current);
@@ -501,6 +620,7 @@ export default function Index() {
       isEvolutionBusy ||
       isTutorialOpen ||
       isDeveloperPanelOpen ||
+      isAchievementOpen ||
       isOptionOpen ||
       isProfileOpen ||
       isFriendOpen ||
@@ -510,6 +630,7 @@ export default function Index() {
       isQuizOpen;
   }, [
     isDeveloperPanelOpen,
+    isAchievementOpen,
     isEvolutionBusy,
     isGameLoadingVisible,
     isMiniGameLoading,
@@ -542,6 +663,7 @@ export default function Index() {
       isMiniGameLoading ||
       isEvolutionBusy ||
       isDeveloperPanelOpen ||
+      isAchievementOpen ||
       isOptionOpen ||
       isProfileOpen ||
       isFriendOpen ||
@@ -568,6 +690,7 @@ export default function Index() {
   }, [
     hasSeenGameTutorial,
     isDeveloperPanelOpen,
+    isAchievementOpen,
     isEvolutionBusy,
     isFriendListOpen,
     isFriendOpen,
@@ -688,6 +811,7 @@ export default function Index() {
       isTutorialOpen ||
       isBooChatVisible ||
       isDeveloperPanelOpen ||
+      isAchievementOpen ||
       isOptionOpen ||
       isProfileOpen ||
       isFriendOpen ||
@@ -710,6 +834,7 @@ export default function Index() {
   }, [
     isBooChatVisible,
     isDeveloperPanelOpen,
+    isAchievementOpen,
     isEvolutionBusy,
     isFriendListOpen,
     isFriendOpen,
@@ -734,6 +859,7 @@ export default function Index() {
     setIsSoundSettingsOpen(false);
     setIsMealOpen(false);
     setIsQuizOpen(false);
+    setIsAchievementOpen(false);
   }, []);
 
   const showTopAlert = useCallback(
@@ -1048,6 +1174,7 @@ export default function Index() {
     setIsFriendListOpen(false);
     setIsSoundSettingsOpen(false);
     setIsMealOpen(false);
+    setIsAchievementOpen(false);
     setIsQuizOpen((prev) => !prev);
   };
 
@@ -1238,6 +1365,7 @@ export default function Index() {
                   setIsSoundSettingsOpen(false);
                   setIsMealOpen(false);
                   setIsQuizOpen(false);
+                  setIsAchievementOpen(false);
                   setIsFriendOpen((prev) => !prev);
                 }}
                 shadow
@@ -1253,7 +1381,26 @@ export default function Index() {
                   setIsSoundSettingsOpen(false);
                   setIsMealOpen(false);
                   setIsQuizOpen(false);
+                  setIsAchievementOpen(false);
                   setIsOptionOpen((prev) => !prev);
+                }}
+                shadow
+              />
+            </View>
+            <View style={styles.achievementButtonRow}>
+              <SquareButton
+                disabled={isEvolutionSequenceActive}
+                Icon={crown}
+                onPress={() => {
+                  setIsDeveloperPanelOpen(false);
+                  setIsFriendOpen(false);
+                  setIsOptionOpen(false);
+                  setIsProfileOpen(false);
+                  setIsFriendListOpen(false);
+                  setIsSoundSettingsOpen(false);
+                  setIsMealOpen(false);
+                  setIsQuizOpen(false);
+                  setIsAchievementOpen((prev) => !prev);
                 }}
                 shadow
               />
@@ -1274,6 +1421,7 @@ export default function Index() {
                     setIsMealOpen(false);
                     setIsQuizOpen(false);
                     setIsOptionOpen(false);
+                    setIsAchievementOpen(false);
                     setIsDeveloperPanelOpen(true);
                   }}
                   style={({ pressed }) => [
@@ -1348,6 +1496,7 @@ export default function Index() {
                 setIsFriendListOpen(false);
                 setIsSoundSettingsOpen(false);
                 setIsQuizOpen(false);
+                setIsAchievementOpen(false);
                 setIsMealOpen((prev) => !prev);
               }}
               size="M"
@@ -1419,6 +1568,9 @@ export default function Index() {
           setIsQuizOpen={setIsQuizOpen}
         />
       )}
+      {isAchievementOpen && (
+        <AchievementPanel onClose={() => setIsAchievementOpen(false)} />
+      )}
       {isDeveloperPanelOpen && (
         <DeveloperPanel
           onActionFeedback={(title, message) =>
@@ -1459,6 +1611,10 @@ const styles = StyleSheet.create({
   topRightButtonRow: {
     flexDirection: "row",
     gap: 8,
+  },
+  achievementButtonRow: {
+    marginTop: 8,
+    alignItems: "flex-end",
   },
   developerShortcutRow: {
     marginTop: 6,

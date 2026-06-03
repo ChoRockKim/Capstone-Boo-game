@@ -5,6 +5,8 @@
  * @side-effects SplashScreen 제어, 이미지/폰트/오디오 preload, Android navigation bar 설정
  */
 import { preloadLoadingOverlayAssets } from "@/components/LoadingOverlay/LoadingOverlayAssets";
+import TopAlert from "@/components/TopAlert/TopAlert";
+import { getAchievementRewardLabel } from "@/constants/achievements";
 import { useGameStore } from "@/stores/useGameStore";
 import {
   preloadBackgroundMusicTracks,
@@ -43,6 +45,12 @@ export default function RootLayout() {
   const masterVolume = useGameStore((state) => state.masterVolume);
   const bgmVolume = useGameStore((state) => state.bgmVolume);
   const sfxVolume = useGameStore((state) => state.sfxVolume);
+  const achievementAlert = useGameStore(
+    (state) => state.achievementAlertQueue[0] ?? null,
+  );
+  const dismissAchievementAlert = useGameStore(
+    (state) => state.dismissAchievementAlert,
+  );
   const [queryClient] = useState(
     () =>
       new QueryClient({
@@ -110,7 +118,25 @@ export default function RootLayout() {
           <Stack.Screen name="miniGame/catchBoo" />
           <Stack.Screen name="miniGame/catchBooPlay" />
           <Stack.Screen name="miniGame/freeThrow" />
+          <Stack.Screen name="miniGame/freeThrowPlay" />
         </Stack>
+        <TopAlert
+          autoHideDuration={3200}
+          message={
+            achievementAlert
+              ? `달성: ${achievementAlert.title}\n보상: ${getAchievementRewardLabel(achievementAlert.reward)}`
+              : ""
+          }
+          onClose={dismissAchievementAlert}
+          textSize="compact"
+          title={achievementAlert ? "업적 달성!" : ""}
+          visibilityKey={
+            achievementAlert
+              ? `${achievementAlert.key}-${achievementAlert.unlockedAt}`
+              : 0
+          }
+          visible={!!achievementAlert}
+        />
       </SafeAreaProvider>
     </QueryClientProvider>
   );

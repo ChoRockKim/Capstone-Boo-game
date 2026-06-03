@@ -24,23 +24,30 @@ import SquareButton from "@/components/SquareButton/SquareButton";
 import { colors } from "@/constants/colors";
 import { fonts } from "@/constants/fonts";
 import { useGameStore } from "@/stores/useGameStore";
+import { useRequirePlayableSession } from "@/useHook/useRequirePlayableSession";
 import { useSyncServerUserStatsOnFocus } from "@/useHook/useSyncServerUserStatsOnFocus";
 import { startBackgroundMusicSession } from "@/utils/backgroundMusic";
 import {
   equipRoomItem,
+  getMyRoom,
   getServerApiErrorMessage,
   listRoomGuestbook,
+  listShopItemTypes,
   listShopItems,
   purchaseShopItem,
   ShopItemOut,
 } from "@/utils/serverApi";
 import { mapGuestbookOutToListEntry } from "@/utils/serverGuestbookAdapter";
+import {
+  getServerShopItemForLocalRoomOption,
+  mapServerRoomAndShopItemsToLocalRoomState,
+} from "@/utils/serverRoomAdapter";
 import { playSoundEffect } from "@/utils/soundEffects";
 import { getXpProgressInfo } from "@/utils/xpProgress";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { router, useFocusEffect } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Pressable,
   StyleSheet,
@@ -93,7 +100,7 @@ const getRoomItemCustomizeOptions = (
     }));
 };
 
-const ROOM_CUSTOMIZE_CATEGORIES: RoomCustomizeCategory[] = [
+const DEFAULT_ROOM_CUSTOMIZE_CATEGORIES: RoomCustomizeCategory[] = [
   {
     id: "wallpaper",
     label: "벽지",
@@ -131,9 +138,6 @@ const getCustomizeOptionIndexInOptions = (
   return optionIndex >= 0 ? optionIndex : 0;
 };
 
-const normalizeServerItemKey = (value: string) =>
-  value.toLowerCase().replace(/[\s_-]/g, "");
-
 const getServerShopItemForCustomizeOption = ({
   option,
   serverShopItems,
@@ -143,44 +147,30 @@ const getServerShopItemForCustomizeOption = ({
   serverShopItems: ShopItemOut[] | undefined;
   type: RoomCustomizeCategoryId;
 }) => {
-  if (!serverShopItems) {
+  const serverItemType = type === "wallpaper" ? "wallpaper" : type;
+
+  if (
+    serverItemType !== "wallpaper" &&
+    serverItemType !== "bed" &&
+    serverItemType !== "closet" &&
+    serverItemType !== "table"
+  ) {
     return null;
   }
 
-  const optionId = String(option.id);
-  const optionKeys = new Set([
-    normalizeServerItemKey(optionId),
-    normalizeServerItemKey(option.label),
-  ]);
-
-  return (
-    serverShopItems.find((item) => {
-      const itemTypeMatches =
-        type === "wallpaper"
-          ? item.item_type === "wallpaper"
-          : item.item_type === type;
-
-      if (!itemTypeMatches) {
-        return false;
-      }
-
-      const itemNameKey = normalizeServerItemKey(item.name);
-      const itemImageKey = item.image
-        ? normalizeServerItemKey(item.image)
-        : "";
-
-      return (
-        optionKeys.has(itemNameKey) ||
-        Array.from(optionKeys).some((key) => itemImageKey.includes(key))
-      );
-    }) ?? null
-  );
+  return getServerShopItemForLocalRoomOption({
+    optionId: String(option.id),
+    optionLabel: option.label,
+    serverShopItems,
+    type: serverItemType,
+  });
 };
-
 
 export default function RoomIndex() {
   const insets = useSafeAreaInsets();
+  useRequirePlayableSession();
   useSyncServerUserStatsOnFocus();
+  const queryClient = useQueryClient();
   const { height, width } = useWindowDimensions();
   const [isCustomizeMode, setIsCustomizeMode] = useState(false);
   const [showOwnedCustomizeOptionsOnly, setShowOwnedCustomizeOptionsOnly] =
@@ -214,14 +204,26 @@ export default function RoomIndex() {
   const purchaseRoomWallpaper = useGameStore(
     (state) => state.purchaseRoomWallpaper,
   );
+  const recordRoomEnter = useGameStore((state) => state.recordRoomEnter);
+  const recordRoomItemEquip = useGameStore(
+    (state) => state.recordRoomItemEquip,
+  );
   const setEquippedRoomItem = useGameStore(
     (state) => state.setEquippedRoomItem,
   );
   const setEquippedRoomWallpaper = useGameStore(
     (state) => state.setEquippedRoomWallpaper,
   );
+  const setGameState = useGameStore((state) => state.setGameState);
   const totalXp = useGameStore((state) => state.totalXp);
   const userId = useGameStore((state) => state.userId);
+  const { data: serverRoom } = useQuery({
+    queryKey: ["rooms", "me", accessToken],
+    queryFn: () => getMyRoom(accessToken ?? undefined),
+    enabled: !!accessToken,
+    staleTime: 1000 * 30,
+    retry: 1,
+  });
   const { data: serverGuestbookEntries } = useQuery({
     queryKey: ["rooms", userId, "guestbook"],
     queryFn: () => listRoomGuestbook(userId ?? 0, accessToken ?? undefined),
@@ -236,6 +238,48 @@ export default function RoomIndex() {
     staleTime: 1000 * 30,
     retry: 1,
   });
+  const { data: serverShopItemTypes } = useQuery({
+    queryKey: ["shop", "item-types"],
+    queryFn: listShopItemTypes,
+    staleTime: 1000 * 60 * 5,
+    retry: 1,
+  });
+  const roomCustomizeCategories = useMemo(() => {
+    if (!serverShopItemTypes?.length) {
+      return DEFAULT_ROOM_CUSTOMIZE_CATEGORIES;
+    }
+
+    const serverLabelByType = new Map(
+      serverShopItemTypes.map((itemType) => [
+        itemType.item_type,
+        itemType.label,
+      ]),
+    );
+
+    return DEFAULT_ROOM_CUSTOMIZE_CATEGORIES.map((category) => ({
+      ...category,
+      label: serverLabelByType.get(category.id) ?? category.label,
+    }));
+  }, [serverShopItemTypes]);
+  useEffect(() => {
+    if (!accessToken || (!serverRoom && !serverShopItems)) {
+      return;
+    }
+
+    const nextRoomState = mapServerRoomAndShopItemsToLocalRoomState({
+      roomView: serverRoom,
+      shopItems: serverShopItems,
+    });
+
+    setGameState(
+      serverShopItems
+        ? nextRoomState
+        : {
+            equippedRoomItems: nextRoomState.equippedRoomItems,
+            equippedRoomWallpaper: nextRoomState.equippedRoomWallpaper,
+          },
+    );
+  }, [accessToken, serverRoom, serverShopItems, setGameState]);
   const guestbookEntries = useMemo(
     () => serverGuestbookEntries?.map(mapGuestbookOutToListEntry),
     [serverGuestbookEntries],
@@ -262,19 +306,19 @@ export default function RoomIndex() {
   const getCustomizeOptionIndexesFromEquippedForMode = useCallback(
     (ownedOnly = showOwnedCustomizeOptionsOnly) => ({
       wallpaper: getCustomizeOptionIndexInOptions(
-        getVisibleCustomizeOptions(ROOM_CUSTOMIZE_CATEGORIES[0], ownedOnly),
+        getVisibleCustomizeOptions(roomCustomizeCategories[0], ownedOnly),
         equippedRoomWallpaper,
       ),
       bed: getCustomizeOptionIndexInOptions(
-        getVisibleCustomizeOptions(ROOM_CUSTOMIZE_CATEGORIES[1], ownedOnly),
+        getVisibleCustomizeOptions(roomCustomizeCategories[1], ownedOnly),
         equippedRoomItems.bed,
       ),
       closet: getCustomizeOptionIndexInOptions(
-        getVisibleCustomizeOptions(ROOM_CUSTOMIZE_CATEGORIES[2], ownedOnly),
+        getVisibleCustomizeOptions(roomCustomizeCategories[2], ownedOnly),
         equippedRoomItems.closet,
       ),
       table: getCustomizeOptionIndexInOptions(
-        getVisibleCustomizeOptions(ROOM_CUSTOMIZE_CATEGORIES[3], ownedOnly),
+        getVisibleCustomizeOptions(roomCustomizeCategories[3], ownedOnly),
         equippedRoomItems.table,
       ),
     }),
@@ -282,11 +326,12 @@ export default function RoomIndex() {
       equippedRoomItems,
       equippedRoomWallpaper,
       getVisibleCustomizeOptions,
+      roomCustomizeCategories,
       showOwnedCustomizeOptionsOnly,
     ],
   );
   const selectedCustomizeCategory =
-    ROOM_CUSTOMIZE_CATEGORIES[customizeCategoryIndex];
+    roomCustomizeCategories[customizeCategoryIndex];
   const selectedCustomizeOptions = getVisibleCustomizeOptions(
     selectedCustomizeCategory,
   );
@@ -379,7 +424,7 @@ export default function RoomIndex() {
   const changeCustomizeCategory = (direction: -1 | 1) => {
     playSoundEffect("basicClick");
     setCustomizeCategoryIndex((currentIndex) =>
-      getNextIndex(currentIndex, direction, ROOM_CUSTOMIZE_CATEGORIES.length),
+      getNextIndex(currentIndex, direction, roomCustomizeCategories.length),
     );
   };
 
@@ -421,6 +466,12 @@ export default function RoomIndex() {
       if (accessToken && selectedServerShopItem) {
         try {
           await equipRoomItem(selectedServerShopItem.item_id, accessToken);
+          void queryClient.invalidateQueries({
+            queryKey: ["rooms", "me"],
+          });
+          void queryClient.invalidateQueries({
+            queryKey: ["shop", "items"],
+          });
         } catch (error) {
           setPurchaseErrorMessage(
             getServerApiErrorMessage(error, "장착에 실패했어요."),
@@ -446,6 +497,12 @@ export default function RoomIndex() {
     if (accessToken && selectedServerShopItem) {
       try {
         await equipRoomItem(selectedServerShopItem.item_id, accessToken);
+        void queryClient.invalidateQueries({
+          queryKey: ["rooms", "me"],
+        });
+        void queryClient.invalidateQueries({
+          queryKey: ["shop", "items"],
+        });
       } catch (error) {
         setPurchaseErrorMessage(
           getServerApiErrorMessage(error, "장착에 실패했어요."),
@@ -491,9 +548,14 @@ export default function RoomIndex() {
           serverPurchaseItem.item_id,
           accessToken,
         );
+        let didEquipPurchasedItem = false;
 
         try {
           await equipRoomItem(purchaseResult.item.item_id, accessToken);
+          didEquipPurchasedItem = true;
+          void queryClient.invalidateQueries({
+            queryKey: ["rooms", "me"],
+          });
         } catch (error) {
           console.warn("서버 구매 후 장착 실패", error);
         }
@@ -503,7 +565,11 @@ export default function RoomIndex() {
         if (purchaseWallpaper) {
           useGameStore.getState().setGameState({
             coin: purchaseResult.coin,
-            equippedRoomWallpaper: purchaseTarget.id as RoomWallpaperId,
+            ...(didEquipPurchasedItem
+              ? {
+                  equippedRoomWallpaper: purchaseTarget.id as RoomWallpaperId,
+                }
+              : {}),
             ownedRoomWallpapers: Array.from(
               new Set([
                 ...currentGameState.ownedRoomWallpapers,
@@ -511,13 +577,21 @@ export default function RoomIndex() {
               ]),
             ),
           });
+          if (didEquipPurchasedItem) {
+            recordRoomItemEquip();
+          }
         } else if (purchaseRoomItemAsset) {
           useGameStore.getState().setGameState({
             coin: purchaseResult.coin,
-            equippedRoomItems: {
-              ...currentGameState.equippedRoomItems,
-              [purchaseRoomItemAsset.slotId]: purchaseTarget.id as RoomItemId,
-            },
+            ...(didEquipPurchasedItem
+              ? {
+                  equippedRoomItems: {
+                    ...currentGameState.equippedRoomItems,
+                    [purchaseRoomItemAsset.slotId]:
+                      purchaseTarget.id as RoomItemId,
+                  },
+                }
+              : {}),
             ownedRoomItems: Array.from(
               new Set([
                 ...currentGameState.ownedRoomItems,
@@ -525,6 +599,9 @@ export default function RoomIndex() {
               ]),
             ),
           });
+          if (didEquipPurchasedItem) {
+            recordRoomItemEquip();
+          }
         } else {
           useGameStore.getState().setGameState({
             coin: purchaseResult.coin,
@@ -532,6 +609,9 @@ export default function RoomIndex() {
         }
 
         void refetchServerShopItems();
+        void queryClient.invalidateQueries({
+          queryKey: ["shop", "items"],
+        });
         setPurchaseTarget(null);
         setPurchaseErrorMessage("");
         return;
@@ -597,8 +677,9 @@ export default function RoomIndex() {
 
   useFocusEffect(
     useCallback(() => {
+      recordRoomEnter();
       return startBackgroundMusicSession("myRoom");
-    }, []),
+    }, [recordRoomEnter]),
   );
 
   return (

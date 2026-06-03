@@ -12,6 +12,7 @@ import {
   getNextQuiz,
   getQuizPlayStatus,
   getServerApiErrorMessage,
+  listAvailableQuizzes,
   QuizQuestionOut,
   submitQuizAnswer,
 } from "@/utils/serverApi";
@@ -81,7 +82,7 @@ const mapServerQuizQuestion = (
 
   if (options.length > 0) {
     return {
-      answer: "",
+      answer: quizQuestion.answer ?? "",
       id: `server-quiz-${quizQuestion.quiz_id}`,
       options,
       question: quizQuestion.question,
@@ -91,13 +92,25 @@ const mapServerQuizQuestion = (
     };
   }
 
+  if (quizQuestion.answer === "O" || quizQuestion.answer === "X") {
+    return {
+      answer: quizQuestion.answer,
+      id: `server-quiz-${quizQuestion.quiz_id}`,
+      question: quizQuestion.question,
+      resultText: "서버에서 채점한 결과입니다.",
+      serverQuizId: quizQuestion.quiz_id,
+      type: "ox",
+    };
+  }
+
   return {
-    answer: "O",
+    answer: "",
     id: `server-quiz-${quizQuestion.quiz_id}`,
+    options: ["O", "X"],
     question: quizQuestion.question,
     resultText: "서버에서 채점한 결과입니다.",
     serverQuizId: quizQuestion.quiz_id,
-    type: "ox",
+    type: "multiple-choice",
   };
 };
 
@@ -150,9 +163,32 @@ function QuizPanel({ onQuizResultAlert, setIsQuizOpen }: QuizPanelProps) {
     gcTime: 1000 * 60 * 5,
     retry: 1,
   });
+  const {
+    data: serverAvailableQuizzes,
+    isLoading: isServerAvailableQuizzesLoading,
+    refetch: refetchServerAvailableQuizzes,
+  } = useQuery({
+    queryKey: [
+      "quizzes",
+      "available",
+      accessToken,
+      serverQuizStatus?.solved_today,
+    ],
+    queryFn: () => listAvailableQuizzes(accessToken ?? undefined),
+    enabled:
+      isServerQuizEnabled &&
+      serverQuizStatus?.can_play_now === true &&
+      !serverNextQuiz,
+    staleTime: 0,
+    gcTime: 1000 * 60 * 5,
+    retry: 1,
+  });
   const serverQuestion = useMemo(
-    () => mapServerQuizQuestion(serverNextQuiz),
-    [serverNextQuiz],
+    () =>
+      mapServerQuizQuestion(
+        serverNextQuiz ?? serverAvailableQuizzes?.[0] ?? null,
+      ),
+    [serverAvailableQuizzes, serverNextQuiz],
   );
 
   const quizCountToday = useMemo(
@@ -305,6 +341,53 @@ function QuizPanel({ onQuizResultAlert, setIsQuizOpen }: QuizPanelProps) {
       accessToken &&
       typeof activeQuestion.serverQuizId === "number"
     ) {
+      const canOptimisticallyGrade = activeQuestion.answer.trim().length > 0;
+      const rollbackState = useGameStore.getState();
+      const optimisticIsCorrect = canOptimisticallyGrade
+        ? isQuizAnswerCorrect(activeQuestion, selectedAnswer)
+        : false;
+
+      if (canOptimisticallyGrade) {
+        const optimisticXpDelta = optimisticIsCorrect
+          ? QUIZ_CORRECT_XP_REWARD
+          : -QUIZ_WRONG_XP_PENALTY;
+
+        applyServerQuizSubmit({
+          coin: optimisticIsCorrect
+            ? rollbackState.coin + QUIZ_CORRECT_COIN_REWARD
+            : rollbackState.coin,
+          isCorrect: optimisticIsCorrect,
+          totalXp: Math.max(rollbackState.totalXp + optimisticXpDelta, 0),
+        });
+        setResultState({
+          answerLabel: getQuizAnswerLabel(activeQuestion),
+          coinDelta: optimisticIsCorrect ? QUIZ_CORRECT_COIN_REWARD : 0,
+          description: optimisticIsCorrect
+            ? "정답입니다!"
+            : "아쉽지만 오답이에요.",
+          isCorrect: optimisticIsCorrect,
+          xpDelta: optimisticXpDelta,
+        });
+        onQuizResultAlert(optimisticIsCorrect);
+      }
+      const optimisticState = useGameStore.getState();
+      const optimisticCoinBase =
+        rollbackState.coin +
+        (optimisticIsCorrect ? QUIZ_CORRECT_COIN_REWARD : 0);
+      const optimisticXpBase = Math.max(
+        rollbackState.totalXp +
+          (optimisticIsCorrect
+            ? QUIZ_CORRECT_XP_REWARD
+            : -QUIZ_WRONG_XP_PENALTY),
+        0,
+      );
+      const optimisticAchievementCoinDelta = canOptimisticallyGrade
+        ? Math.max(optimisticState.coin - optimisticCoinBase, 0)
+        : 0;
+      const optimisticAchievementXpDelta = canOptimisticallyGrade
+        ? Math.max(optimisticState.totalXp - optimisticXpBase, 0)
+        : 0;
+
       setIsSubmittingAnswer(true);
 
       try {
@@ -316,26 +399,69 @@ function QuizPanel({ onQuizResultAlert, setIsQuizOpen }: QuizPanelProps) {
           accessToken,
         );
 
+        if (
+          canOptimisticallyGrade &&
+          optimisticIsCorrect !== submitResult.correct
+        ) {
+          useGameStore.getState().setGameState({
+            achievementAlertQueue: rollbackState.achievementAlertQueue,
+            achievementStats: rollbackState.achievementStats,
+            coin: rollbackState.coin,
+            completedAchievementKeys: rollbackState.completedAchievementKeys,
+            ownedAchievementSkins: rollbackState.ownedAchievementSkins,
+            pendingEvolution: rollbackState.pendingEvolution,
+            totalXp: rollbackState.totalXp,
+          });
+        }
+
         applyServerQuizSubmit({
-          coin: submitResult.coin,
-          quizId: activeQuestion.id,
-          totalXp: submitResult.xp_point,
-        });
-        setResultState({
-          answerLabel: submitResult.correct_answer,
-          coinDelta: submitResult.awarded_coin,
-          description:
-            submitResult.detail ||
-            (submitResult.correct ? "정답입니다!" : "아쉽지만 오답이에요."),
+          coin:
+            submitResult.coin +
+            (optimisticIsCorrect === submitResult.correct
+              ? optimisticAchievementCoinDelta
+              : 0),
+          countAchievement:
+            !canOptimisticallyGrade ||
+            optimisticIsCorrect !== submitResult.correct,
           isCorrect: submitResult.correct,
-          xpDelta: submitResult.awarded_points,
+          totalXp:
+            submitResult.xp_point +
+            (optimisticIsCorrect === submitResult.correct
+              ? optimisticAchievementXpDelta
+              : 0),
         });
-        onQuizResultAlert(submitResult.correct);
+        if (
+          !canOptimisticallyGrade ||
+          optimisticIsCorrect !== submitResult.correct
+        ) {
+          setResultState({
+            answerLabel: submitResult.correct_answer,
+            coinDelta: submitResult.awarded_coin,
+            description:
+              submitResult.detail ||
+              (submitResult.correct ? "정답입니다!" : "아쉽지만 오답이에요."),
+            isCorrect: submitResult.correct,
+            xpDelta: submitResult.awarded_points,
+          });
+          onQuizResultAlert(submitResult.correct);
+        }
         await Promise.all([
           refetchServerQuizStatus(),
           refetchServerNextQuiz(),
+          refetchServerAvailableQuizzes(),
         ]);
       } catch (error) {
+        if (canOptimisticallyGrade) {
+          useGameStore.getState().setGameState({
+            achievementAlertQueue: rollbackState.achievementAlertQueue,
+            achievementStats: rollbackState.achievementStats,
+            coin: rollbackState.coin,
+            completedAchievementKeys: rollbackState.completedAchievementKeys,
+            ownedAchievementSkins: rollbackState.ownedAchievementSkins,
+            pendingEvolution: rollbackState.pendingEvolution,
+            totalXp: rollbackState.totalXp,
+          });
+        }
         setCurrentQuestion(null);
         setSelectedAnswer(null);
         setResultState({
@@ -385,7 +511,7 @@ function QuizPanel({ onQuizResultAlert, setIsQuizOpen }: QuizPanelProps) {
       return activeQuestion.question;
     }
 
-    if (isServerNextQuizLoading) {
+    if (isServerNextQuizLoading || isServerAvailableQuizzesLoading) {
       return "퀴즈를\n불러오고 있어요.";
     }
 
@@ -408,6 +534,7 @@ function QuizPanel({ onQuizResultAlert, setIsQuizOpen }: QuizPanelProps) {
     nextAvailableAt,
     now,
     isServerNextQuizLoading,
+    isServerAvailableQuizzesLoading,
     isServerQuizStatusLoading,
     resultState,
   ]);

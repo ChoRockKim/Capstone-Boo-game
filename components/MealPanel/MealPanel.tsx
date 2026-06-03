@@ -11,8 +11,10 @@ import { fonts } from "@/constants/fonts";
 import { useGameStore } from "@/stores/useGameStore";
 import {
   feedSchoolFood,
+  getSchoolFood,
   getSchoolFoodFeedStatus,
   getServerApiErrorMessage,
+  listSchoolFoods,
   listTodaySchoolFoods,
   type SchoolFood,
 } from "@/utils/serverApi";
@@ -37,7 +39,7 @@ import {
   isWeekendDate,
   MEAL_SECTIONS,
   MealMenuItem,
-  MealSectionId,
+  normalizeMealSectionId,
 } from "./MealMenuData";
 
 interface MealPanelProps {
@@ -48,6 +50,7 @@ interface MealPanelProps {
 
 const PANEL_HORIZONTAL_PADDING = 28;
 const FALLBACK_SERVER_MEAL_PRICE = 4;
+const OPTIMISTIC_FEED_XP_REWARD = 50;
 
 const getServerMealMenuItems = (schoolFoods: SchoolFood[]): MealMenuItem[] => {
   const fallbackImages = MEAL_SECTIONS[0].menus.map((menu) => menu.image);
@@ -61,40 +64,6 @@ const getServerMealMenuItems = (schoolFoods: SchoolFood[]): MealMenuItem[] => {
       price: FALLBACK_SERVER_MEAL_PRICE,
       schoolFoodId: food.school_food_id,
     }));
-};
-
-const normalizeMealSectionId = (value?: string | null): MealSectionId | null => {
-  if (!value) {
-    return null;
-  }
-
-  const normalizedValue = value.toLowerCase().replace(/\s/g, "");
-
-  if (
-    normalizedValue.includes("breakfast") ||
-    normalizedValue.includes("조식") ||
-    normalizedValue.includes("아침")
-  ) {
-    return "breakfast";
-  }
-
-  if (
-    normalizedValue.includes("lunch") ||
-    normalizedValue.includes("중식") ||
-    normalizedValue.includes("점심")
-  ) {
-    return "lunch";
-  }
-
-  if (
-    normalizedValue.includes("dinner") ||
-    normalizedValue.includes("석식") ||
-    normalizedValue.includes("저녁")
-  ) {
-    return "dinner";
-  }
-
-  return null;
 };
 
 const MealPanel = ({
@@ -112,6 +81,7 @@ const MealPanel = ({
   const mealRestrictionEnabled = useGameStore(
     (state) => state.mealRestrictionEnabled,
   );
+  const setGameState = useGameStore((state) => state.setGameState);
   const [now, setNow] = useState(() => new Date());
   const [feedErrorMessage, setFeedErrorMessage] = useState<string | null>(null);
   const [isFeeding, setIsFeeding] = useState(false);
@@ -146,12 +116,23 @@ const MealPanel = ({
 
   const isWeekend = isWeekendDate(now, mealDayMode);
   const activeMealSectionId = getActiveMealSectionId(now);
+  const { data: fallbackSchoolFoods = [] } = useQuery({
+    queryKey: ["schoolFoods", "list", activeMealSectionId],
+    queryFn: () => listSchoolFoods(activeMealSectionId),
+    enabled: todaySchoolFoods.length === 0,
+    staleTime: 1000 * 60 * 10,
+    gcTime: 1000 * 60 * 30,
+    retry: 1,
+  });
   const baseCurrentSection = activeMealSectionId
     ? getMealSectionById(activeMealSectionId, now, mealDayMode)
     : getMealSectionById(MEAL_SECTIONS[0].id, now, mealDayMode);
   const serverMealMenuItems = useMemo(
-    () => getServerMealMenuItems(todaySchoolFoods),
-    [todaySchoolFoods],
+    () =>
+      getServerMealMenuItems(
+        todaySchoolFoods.length > 0 ? todaySchoolFoods : fallbackSchoolFoods,
+      ),
+    [fallbackSchoolFoods, todaySchoolFoods],
   );
   const currentSection =
     serverMealMenuItems.length > 0
@@ -169,15 +150,20 @@ const MealPanel = ({
   );
   const effectiveActiveMealSectionId =
     serverActiveMealSectionId ?? activeMealSectionId;
+  const serverFedMealSectionIds = new Set(
+    feedStatus?.fed_slots
+      .map((slot) => normalizeMealSectionId(slot))
+      .filter((slot) => slot !== null) ?? [],
+  );
   const todayKey = getLocalDateKey(now);
-  const hasFedCurrentMeal =
-    feedStatus && effectiveActiveMealSectionId
-      ? feedStatus.fed_slots.includes(effectiveActiveMealSectionId)
-      : !!activeMealSectionId && lastFedMeals[activeMealSectionId] === todayKey;
+  const hasFedCurrentMeal = accessToken
+    ? !!effectiveActiveMealSectionId &&
+      serverFedMealSectionIds.has(effectiveActiveMealSectionId)
+    : !!activeMealSectionId && lastFedMeals[activeMealSectionId] === todayKey;
   const canFeedBySchedule =
     !mealRestrictionEnabled ||
-    (feedStatus
-      ? feedStatus.can_feed_now
+    (accessToken
+      ? feedStatus?.can_feed_now === true
       : !!activeMealSectionId && !hasFedCurrentMeal);
   const canAffordSelectedMeal = coin >= selectedMeal.price;
   const canFeedSelectedMeal =
@@ -222,25 +208,65 @@ const MealPanel = ({
     }
 
     if (accessToken && selectedMeal.schoolFoodId) {
+      const rollbackState = useGameStore.getState();
+      const didOptimisticFeed = feedBoo(
+        selectedMeal.price,
+        effectiveActiveMealSectionId,
+      );
+
+      if (!didOptimisticFeed) {
+        return;
+      }
+
+      const optimisticState = useGameStore.getState();
+      const optimisticAchievementCoinDelta = Math.max(
+        optimisticState.coin - (rollbackState.coin - selectedMeal.price),
+        0,
+      );
+      const optimisticAchievementXpDelta = Math.max(
+        optimisticState.totalXp -
+          (rollbackState.totalXp + OPTIMISTIC_FEED_XP_REWARD),
+        0,
+      );
+
       setIsFeeding(true);
+      playSoundEffect("eating");
+      onFeedSuccess?.();
+      setIsMealOpen(false);
 
       try {
-        const result = await feedSchoolFood(selectedMeal.schoolFoodId, accessToken);
+        await getSchoolFood(selectedMeal.schoolFoodId);
+        const result = await feedSchoolFood(
+          selectedMeal.schoolFoodId,
+          accessToken,
+        );
         applyServerMealFeed({
-          coin: result.coin,
+          coin: result.coin + optimisticAchievementCoinDelta,
+          countAchievement: false,
           mealSectionId:
             normalizeMealSectionId(result.meal_slot) ??
             effectiveActiveMealSectionId,
-          totalXp: result.xp_point,
+          totalXp: result.xp_point + optimisticAchievementXpDelta,
         });
         await refetchFeedStatus();
-        playSoundEffect("eating");
-        onFeedSuccess?.();
-        setIsMealOpen(false);
       } catch (error) {
+        setGameState({
+          achievementAlertQueue: rollbackState.achievementAlertQueue,
+          achievementStats: rollbackState.achievementStats,
+          characterState: rollbackState.characterState,
+          coin: rollbackState.coin,
+          completedAchievementKeys: rollbackState.completedAchievementKeys,
+          lastFedMealSlotIndex: rollbackState.lastFedMealSlotIndex,
+          lastFedMeals: rollbackState.lastFedMeals,
+          ownedAchievementSkins: rollbackState.ownedAchievementSkins,
+          pendingEvolution: rollbackState.pendingEvolution,
+          skippedMealCount: rollbackState.skippedMealCount,
+          totalXp: rollbackState.totalXp,
+        });
         setFeedErrorMessage(
           getServerApiErrorMessage(error, "학식을 먹이지 못했어요."),
         );
+        setIsMealOpen(true);
       } finally {
         setIsFeeding(false);
       }

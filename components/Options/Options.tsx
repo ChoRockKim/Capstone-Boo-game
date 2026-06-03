@@ -1,4 +1,3 @@
-import AlarmIcon from "@/assets/icons/alarm.svg";
 import ArrowOutsideIcon from "@/assets/icons/arrow-outside.svg";
 import CrossIcon from "@/assets/icons/cross.svg";
 import CustomizationIcon from "@/assets/icons/Customization.svg";
@@ -7,10 +6,16 @@ import UserCircleIcon from "@/assets/icons/User-circle.svg";
 import { colors } from "@/constants/colors";
 import { fonts } from "@/constants/fonts";
 import { useGameStore } from "@/stores/useGameStore";
-import { logoutUser } from "@/utils/serverApi";
+import {
+  deleteCharacter,
+  deleteCurrentUser,
+  getServerApiErrorMessage,
+  logoutUser,
+} from "@/utils/serverApi";
+import { Feather } from "@expo/vector-icons";
 import { router } from "expo-router";
 import React, { useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
 import OptionButton from "./OptionButton";
 
 interface OptionsType {
@@ -27,8 +32,13 @@ const Options = ({
   setIsSoundSettingsOpen,
 }: OptionsType) => {
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
+  const [accountErrorMessage, setAccountErrorMessage] = useState("");
+  const accessToken = useGameStore((state) => state.accessToken);
   const refreshToken = useGameStore((state) => state.refreshToken);
+  const isGuestMode = useGameStore((state) => state.isGuestMode);
   const clearAuthSession = useGameStore((state) => state.clearAuthSession);
+  const serverCharacterId = useGameStore((state) => state.serverCharacterId);
   const developerModeEnabled = useGameStore(
     (state) => state.developerModeEnabled,
   );
@@ -37,7 +47,7 @@ const Options = ({
     (state) => state.toggleDeveloperModeEnabled,
   );
 
-  const handleLogoutPress = async () => {
+  const performLogout = async () => {
     if (isLoggingOut) {
       return;
     }
@@ -57,6 +67,82 @@ const Options = ({
       router.replace("/");
       setIsLoggingOut(false);
     }
+  };
+
+  const handleLogoutPress = () => {
+    if (isLoggingOut) {
+      return;
+    }
+
+    Alert.alert(
+      isGuestMode ? "게스트 종료" : "로그아웃",
+      isGuestMode ? "게스트 모드를 종료하시겠습니까?" : "로그아웃 하시겠습니까?",
+      [
+      {
+        text: "취소",
+        style: "cancel",
+      },
+      {
+        text: "확인",
+        onPress: () => {
+          void performLogout();
+        },
+      },
+      ],
+    );
+  };
+
+  const finishLocalSignOut = () => {
+    clearAuthSession();
+    resetGameState();
+    setIsOptionOpen(false);
+    router.replace("/");
+  };
+
+  const performDeleteAccount = async () => {
+    if (!accessToken || isDeletingAccount) {
+      return;
+    }
+
+    setIsDeletingAccount(true);
+    setAccountErrorMessage("");
+
+    try {
+      if (serverCharacterId !== null) {
+        await deleteCharacter(serverCharacterId).catch((error) => {
+          console.warn("회원 탈퇴 전 서버 캐릭터 삭제 실패", error);
+        });
+      }
+
+      await deleteCurrentUser(accessToken);
+      finishLocalSignOut();
+    } catch (error) {
+      setAccountErrorMessage(
+        getServerApiErrorMessage(error, "계정 삭제에 실패했어요."),
+      );
+    } finally {
+      setIsDeletingAccount(false);
+    }
+  };
+
+  const handleDeleteAccountPress = () => {
+    if (!accessToken || isDeletingAccount) {
+      return;
+    }
+
+    Alert.alert("회원 탈퇴", "회원 탈퇴 하시겠습니까?", [
+      {
+        text: "취소",
+        style: "cancel",
+      },
+      {
+        text: "탈퇴",
+        onPress: () => {
+          void performDeleteAccount();
+        },
+        style: "destructive",
+      },
+    ]);
   };
 
   return (
@@ -121,18 +207,6 @@ const Options = ({
           label="사운드 설정"
         />
         <OptionButton
-          icon={(pressed) => (
-            <AlarmIcon
-              width={20}
-              height={20}
-              color={
-                pressed ? colors.WHITE_NORMAL : colors.SILVER_NORMAL_ACTIVE
-              }
-            />
-          )}
-          label="알림"
-        />
-        <OptionButton
           disabled={isLoggingOut}
           onPress={handleLogoutPress}
           icon={(pressed) => (
@@ -144,9 +218,39 @@ const Options = ({
               }
             />
           )}
-          label={isLoggingOut ? "로그아웃 중" : "로그아웃"}
+          label={
+            isLoggingOut
+              ? isGuestMode
+                ? "종료 중"
+                : "로그아웃 중"
+              : isGuestMode
+                ? "게스트 종료"
+                : "로그아웃"
+          }
         />
+        {accessToken ? (
+          <OptionButton
+            disabled={isDeletingAccount}
+            onPress={handleDeleteAccountPress}
+            icon={(pressed) => (
+              <Feather
+                name="trash-2"
+                size={20}
+                color={pressed ? colors.WHITE_NORMAL : colors.DANGER}
+              />
+            )}
+            label={
+              isDeletingAccount
+                ? "탈퇴 처리 중"
+                : "회원 탈퇴"
+            }
+            textColor={colors.DANGER}
+          />
+        ) : null}
       </View>
+      {accountErrorMessage ? (
+        <Text style={styles.accountErrorText}>{accountErrorMessage}</Text>
+      ) : null}
       <View style={styles.developerSection}>
         <View style={styles.developerHeaderRow}>
           <Text style={styles.developerLabel}>개발자 모드</Text>
@@ -207,6 +311,14 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: colors.GRAY_NORMAL_ACTIVE,
     gap: 8,
+  },
+  accountErrorText: {
+    marginTop: 10,
+    color: colors.DANGER,
+    fontFamily: fonts.BASIC,
+    fontSize: 14,
+    includeFontPadding: false,
+    lineHeight: 18,
   },
   developerHeaderRow: {
     flexDirection: "row",

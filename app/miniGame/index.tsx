@@ -14,6 +14,8 @@ import FriendPanel from "@/components/FriendPanel/FriendPanel";
 import LoadingOverlay from "@/components/LoadingOverlay/LoadingOverlay";
 import MainButton from "@/components/MainButton/MainButton";
 import {
+  MINI_GAME_DEFAULT_PLACE_ID,
+  MINI_GAME_DEFAULT_PLACE_INDEX,
   MINI_GAME_PLACE_OPTIONS,
   preloadMiniGamePlaceImageAssets,
 } from "@/components/MiniGame/MiniGameData";
@@ -23,9 +25,15 @@ import ProgressBar from "@/components/ProgressBar/ProgressBar";
 import SoundSettings from "@/components/SoundSettings/SoundSettings";
 import SquareButton from "@/components/SquareButton/SquareButton";
 import TopAlert from "@/components/TopAlert/TopAlert";
+import {
+  MINI_GAME_TUTORIAL_IMAGE_ASSETS,
+  preloadMiniGameTutorialImageAssets,
+} from "@/components/TutorialPanel/TutorialData";
+import TutorialPanel from "@/components/TutorialPanel/TutorialPanel";
 import { colors } from "@/constants/colors";
 import { fonts } from "@/constants/fonts";
 import { useGameStore } from "@/stores/useGameStore";
+import { useRequirePlayableSession } from "@/useHook/useRequirePlayableSession";
 import { useSyncServerUserStatsOnFocus } from "@/useHook/useSyncServerUserStatsOnFocus";
 import { startBackgroundMusicSession } from "@/utils/backgroundMusic";
 import { playSoundEffect } from "@/utils/soundEffects";
@@ -33,7 +41,7 @@ import { getXpProgressInfo } from "@/utils/xpProgress";
 import { Image } from "expo-image";
 import { router, useFocusEffect } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import {
   SafeAreaView,
@@ -58,17 +66,21 @@ type TopAlertState = {
 
 export default function MiniGameIndex() {
   const insets = useSafeAreaInsets();
+  useRequirePlayableSession();
   useSyncServerUserStatsOnFocus();
+  const hasCheckedMiniGameTutorialPromptRef = useRef(false);
   const [isOptionOpen, setIsOptionOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isFriendOpen, setIsFriendOpen] = useState(false);
   const [isFriendListOpen, setIsFriendListOpen] = useState(false);
   const [isSoundSettingsOpen, setIsSoundSettingsOpen] = useState(false);
   const [isPlaceInfoOpen, setIsPlaceInfoOpen] = useState(false);
-  const [selectedPlaceIndex, setSelectedPlaceIndex] = useState(0);
-  const [displayedPlaceIds, setDisplayedPlaceIds] = useState<Set<string>>(
-    () => new Set(),
+  const [isMiniGameTutorialOpen, setIsMiniGameTutorialOpen] = useState(false);
+  const [selectedPlaceIndex, setSelectedPlaceIndex] = useState(
+    MINI_GAME_DEFAULT_PLACE_INDEX,
   );
+  const [hasInitialPlaceDisplayed, setHasInitialPlaceDisplayed] =
+    useState(false);
   const [topAlert, setTopAlert] = useState<TopAlertState>({
     autoHideDuration: 1800,
     id: 0,
@@ -79,32 +91,80 @@ export default function MiniGameIndex() {
   });
   const booName = useGameStore((state) => state.booName);
   const coin = useGameStore((state) => state.coin);
+  const hasSeenMiniGameTutorial = useGameStore(
+    (state) => state.hasSeenMiniGameTutorial,
+  );
+  const setHasSeenMiniGameTutorial = useGameStore(
+    (state) => state.setHasSeenMiniGameTutorial,
+  );
+  const recordCampusVisit = useGameStore((state) => state.recordCampusVisit);
   const totalXp = useGameStore((state) => state.totalXp);
   const selectedPlace = MINI_GAME_PLACE_OPTIONS[selectedPlaceIndex];
-  const isSelectedPlaceImageReady = displayedPlaceIds.has(selectedPlace.id);
   const xpProgress = useMemo(() => getXpProgressInfo(totalXp), [totalXp]);
   const progressBarTopOffset = insets.top + 86;
 
   useFocusEffect(
     useCallback(() => {
+      recordCampusVisit();
       return startBackgroundMusicSession("miniGameMain");
-    }, []),
+    }, [recordCampusVisit]),
   );
 
   useEffect(() => {
     void preloadMiniGamePlaceImageAssets();
+    void preloadMiniGameTutorialImageAssets().catch((error) => {
+      console.warn("Failed to preload mini game tutorial images.", error);
+    });
   }, []);
 
-  const markPlaceImageReady = useCallback((placeId: string) => {
-    setDisplayedPlaceIds((currentIds) => {
-      if (currentIds.has(placeId)) {
-        return currentIds;
-      }
+  useEffect(() => {
+    let isCancelled = false;
 
-      const nextIds = new Set(currentIds);
-      nextIds.add(placeId);
-      return nextIds;
-    });
+    if (hasSeenMiniGameTutorial) {
+      hasCheckedMiniGameTutorialPromptRef.current = false;
+      return undefined;
+    }
+
+    if (
+      hasCheckedMiniGameTutorialPromptRef.current ||
+      !hasInitialPlaceDisplayed ||
+      isOptionOpen ||
+      isProfileOpen ||
+      isFriendOpen ||
+      isFriendListOpen ||
+      isSoundSettingsOpen ||
+      isPlaceInfoOpen
+    ) {
+      return undefined;
+    }
+
+    hasCheckedMiniGameTutorialPromptRef.current = true;
+    void preloadMiniGameTutorialImageAssets()
+      .catch(() => undefined)
+      .then(() => {
+        if (!isCancelled) {
+          setIsMiniGameTutorialOpen(true);
+        }
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [
+    hasInitialPlaceDisplayed,
+    hasSeenMiniGameTutorial,
+    isFriendListOpen,
+    isFriendOpen,
+    isOptionOpen,
+    isPlaceInfoOpen,
+    isProfileOpen,
+    isSoundSettingsOpen,
+  ]);
+
+  const markPlaceImageReady = useCallback((placeId: string) => {
+    if (placeId === MINI_GAME_DEFAULT_PLACE_ID) {
+      setHasInitialPlaceDisplayed(true);
+    }
   }, []);
 
   const closeSubPanels = () => {
@@ -181,6 +241,11 @@ export default function MiniGameIndex() {
       autoHideDuration: 1800,
       textSize: "compact",
     });
+  };
+
+  const completeMiniGameTutorial = () => {
+    setHasSeenMiniGameTutorial(true);
+    setIsMiniGameTutorialOpen(false);
   };
 
   return (
@@ -350,7 +415,14 @@ export default function MiniGameIndex() {
           setIsSoundSettingsOpen={setIsSoundSettingsOpen}
         />
       ) : null}
-      {!isSelectedPlaceImageReady ? <LoadingOverlay /> : null}
+      {!hasInitialPlaceDisplayed ? <LoadingOverlay /> : null}
+      {isMiniGameTutorialOpen ? (
+        <TutorialPanel
+          imageAssets={MINI_GAME_TUTORIAL_IMAGE_ASSETS}
+          onComplete={completeMiniGameTutorial}
+          title="캠퍼스 튜토리얼"
+        />
+      ) : null}
     </View>
   );
 }

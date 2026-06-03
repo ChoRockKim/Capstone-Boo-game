@@ -8,6 +8,7 @@ import { useGameStore } from "@/stores/useGameStore";
 import {
   BooCharacter,
   createCharacter,
+  getCharacter,
   listCharacters,
   updateCharacter,
 } from "@/utils/serverApi";
@@ -48,29 +49,41 @@ export const syncServerCharacter = async ({
 }: SyncServerCharacterParams) => {
   const stage = getXpProgressInfo(totalXp).grade;
   const serverCharacterId = useGameStore.getState().serverCharacterId;
-  const characters = await listCharacters();
   let character =
-    findSyncedCharacter(characters, userId, serverCharacterId) ??
-    (await createCharacter({
+    serverCharacterId !== null
+      ? await getCharacter(serverCharacterId).catch(() => null)
+      : null;
+
+  if (character?.user_id !== userId) {
+    const characters = await listCharacters();
+    character =
+      findSyncedCharacter(characters, userId, serverCharacterId) ?? null;
+  }
+
+  if (!character) {
+    character = await createCharacter({
       character_name: normalizeCharacterName(fallbackName),
       stage,
       user_id: userId,
-    }));
+    });
+  }
 
-  if (character.stage !== stage) {
-    character = await updateCharacter(character.character_id, {
+  let syncedCharacter = character;
+
+  if (syncedCharacter.stage !== stage) {
+    syncedCharacter = await updateCharacter(syncedCharacter.character_id, {
       stage,
     }).catch((error) => {
       console.warn("서버 캐릭터 성장 단계 동기화 실패", error);
 
-      return character;
+      return syncedCharacter;
     });
   }
 
   useGameStore.getState().setGameState({
-    booName: normalizeCharacterName(character.character_name),
-    serverCharacterId: character.character_id,
+    booName: normalizeCharacterName(syncedCharacter.character_name),
+    serverCharacterId: syncedCharacter.character_id,
   });
 
-  return character;
+  return syncedCharacter;
 };

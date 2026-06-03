@@ -45,6 +45,7 @@ const GRAB_RETURN_DURATION_MS = 260;
 const GRAB_FINGER_VISIBILITY_OFFSET_Y = -46;
 const GRAB_CHAT_MESSAGES = ["앗!", "살살 잡아줘!", "부우?"] as const;
 const GRAB_DIZZY_HOLD_MS = 2600;
+const GRAB_DIZZY_GRACE_MS = 450;
 const GRAB_DIZZY_SHAKE_DISTANCE = 230;
 const GRAB_DIZZY_SHAKE_VELOCITY = 1.65;
 const GRAB_DIZZY_MESSAGES = ["어지러워...", "부우... 빙글빙글...", "천천히 흔들어줘!"] as const;
@@ -141,6 +142,8 @@ const RoomMiniBoo = ({
   const grabWiggleAnimation = useRef(new Animated.Value(0)).current;
   const grabDragOffset = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
   const grabStartPositionRef = useRef(initialPoint);
+  const grabStartGestureOffsetRef = useRef({ dx: 0, dy: 0 });
+  const pendingGrabGestureOffsetRef = useRef({ dx: 0, dy: 0 });
   const currentGrabOffsetRef = useRef({ x: 0, y: 0 });
   const grabStartedAtMsRef = useRef(0);
   const grabShakeDistanceRef = useRef(0);
@@ -437,33 +440,34 @@ const RoomMiniBoo = ({
 
     position.stopAnimation((value: { x: number; y: number }) => {
       grabStartPositionRef.current = value;
+      grabStartGestureOffsetRef.current = pendingGrabGestureOffsetRef.current;
+      currentGrabOffsetRef.current = {
+        x: 0,
+        y: GRAB_FINGER_VISIBILITY_OFFSET_Y,
+      };
+      grabStartedAtMsRef.current = Date.now();
+      grabShakeDistanceRef.current = 0;
+      hasShownGrabDizzyRef.current = false;
+      lastGrabMoveRef.current = {
+        timestamp: grabStartedAtMsRef.current,
+        x: 0,
+        y: GRAB_FINGER_VISIBILITY_OFFSET_Y,
+      };
+      grabDragOffset.setValue({ x: 0, y: GRAB_FINGER_VISIBILITY_OFFSET_Y });
+      setIsWalking(false);
+      setIsGrabbed(true);
+      isGrabbedRef.current = true;
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(
+        () => undefined,
+      );
+      Animated.spring(grabLiftAnimation, {
+        damping: 10,
+        mass: 0.6,
+        stiffness: 180,
+        toValue: 1,
+        useNativeDriver: true,
+      }).start();
     });
-    currentGrabOffsetRef.current = {
-      x: 0,
-      y: GRAB_FINGER_VISIBILITY_OFFSET_Y,
-    };
-    grabStartedAtMsRef.current = Date.now();
-    grabShakeDistanceRef.current = 0;
-    hasShownGrabDizzyRef.current = false;
-    lastGrabMoveRef.current = {
-      timestamp: grabStartedAtMsRef.current,
-      x: 0,
-      y: GRAB_FINGER_VISIBILITY_OFFSET_Y,
-    };
-    grabDragOffset.setValue({ x: 0, y: GRAB_FINGER_VISIBILITY_OFFSET_Y });
-    setIsWalking(false);
-    setIsGrabbed(true);
-    isGrabbedRef.current = true;
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(
-      () => undefined,
-    );
-    Animated.spring(grabLiftAnimation, {
-      damping: 10,
-      mass: 0.6,
-      stiffness: 180,
-      toValue: 1,
-      useNativeDriver: true,
-    }).start();
   };
 
   const finishGrab = () => {
@@ -537,6 +541,7 @@ const RoomMiniBoo = ({
             return;
           }
 
+          pendingGrabGestureOffsetRef.current = { dx: 0, dy: 0 };
           grabTimerRef.current = setTimeout(() => {
             grabTimerRef.current = null;
             startGrab();
@@ -544,6 +549,10 @@ const RoomMiniBoo = ({
         },
         onPanResponderMove: (_event, gestureState) => {
           if (!isGrabbedRef.current) {
+            pendingGrabGestureOffsetRef.current = {
+              dx: gestureState.dx,
+              dy: gestureState.dy,
+            };
             return;
           }
 
@@ -554,11 +563,15 @@ const RoomMiniBoo = ({
           const maxY =
             roomHeight - renderedSize.height - grabStartPositionRef.current.y;
 
+          const dragDx =
+            gestureState.dx - grabStartGestureOffsetRef.current.dx;
+          const dragDy =
+            gestureState.dy - grabStartGestureOffsetRef.current.dy;
           const nextOffset = {
-            x: Math.min(maxX, Math.max(minX, gestureState.dx)),
+            x: Math.min(maxX, Math.max(minX, dragDx)),
             y: Math.min(
               maxY,
-              Math.max(minY, gestureState.dy + GRAB_FINGER_VISIBILITY_OFFSET_Y),
+              Math.max(minY, dragDy + GRAB_FINGER_VISIBILITY_OFFSET_Y),
             ),
           };
           const nowMs = Date.now();
@@ -569,8 +582,13 @@ const RoomMiniBoo = ({
           );
           const elapsedMoveMs = Math.max(1, nowMs - lastMove.timestamp);
           const moveVelocity = moveDistance / elapsedMoveMs;
+          const grabElapsedMs = Math.max(0, nowMs - grabStartedAtMsRef.current);
+          const canTriggerDizzyFeedback =
+            grabElapsedMs >= GRAB_DIZZY_GRACE_MS;
 
-          grabShakeDistanceRef.current += moveDistance;
+          if (canTriggerDizzyFeedback) {
+            grabShakeDistanceRef.current += moveDistance;
+          }
           lastGrabMoveRef.current = {
             timestamp: nowMs,
             x: nextOffset.x,
@@ -578,15 +596,12 @@ const RoomMiniBoo = ({
           };
 
           if (
+            canTriggerDizzyFeedback &&
             !hasShownGrabDizzyRef.current &&
             (moveVelocity >= GRAB_DIZZY_SHAKE_VELOCITY ||
               grabShakeDistanceRef.current >= GRAB_DIZZY_SHAKE_DISTANCE)
           ) {
             hasShownGrabDizzyRef.current = true;
-            showGrabDizzyChat();
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(
-              () => undefined,
-            );
           }
 
           currentGrabOffsetRef.current = nextOffset;

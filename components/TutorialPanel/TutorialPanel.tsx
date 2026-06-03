@@ -8,6 +8,7 @@ import CrossIcon from "@/assets/icons/cross.svg";
 import { TUTORIAL_IMAGE_ASSETS } from "@/components/TutorialPanel/TutorialData";
 import { colors } from "@/constants/colors";
 import { fonts } from "@/constants/fonts";
+import { PreloadableImageAsset } from "@/utils/preloadImageAssets";
 import { playSoundEffect } from "@/utils/soundEffects";
 import { Feather } from "@expo/vector-icons";
 import { Image } from "expo-image";
@@ -15,16 +16,24 @@ import { useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
 interface TutorialPanelProps {
+  imageAssets?: PreloadableImageAsset[];
+  message?: string;
   onComplete: () => void;
+  title?: string;
 }
 
 type TutorialMode = "confirm" | "viewer";
 
-const TutorialPanel = ({ onComplete }: TutorialPanelProps) => {
+const TutorialPanel = ({
+  imageAssets = TUTORIAL_IMAGE_ASSETS,
+  message = "튜토리얼을 진행하시겠습니까?",
+  onComplete,
+  title = "튜토리얼",
+}: TutorialPanelProps) => {
   const [mode, setMode] = useState<TutorialMode>("confirm");
   const [currentIndex, setCurrentIndex] = useState(0);
   const isFirstTutorial = currentIndex === 0;
-  const isLastTutorial = currentIndex === TUTORIAL_IMAGE_ASSETS.length - 1;
+  const isLastTutorial = currentIndex === imageAssets.length - 1;
 
   const completeTutorial = () => {
     playSoundEffect("basicClick");
@@ -53,9 +62,7 @@ const TutorialPanel = ({ onComplete }: TutorialPanelProps) => {
       return;
     }
 
-    setCurrentIndex((prev) =>
-      Math.min(prev + 1, TUTORIAL_IMAGE_ASSETS.length - 1),
-    );
+    setCurrentIndex((prev) => Math.min(prev + 1, imageAssets.length - 1));
   };
 
   if (mode === "viewer") {
@@ -64,7 +71,7 @@ const TutorialPanel = ({ onComplete }: TutorialPanelProps) => {
         <Image
           cachePolicy="memory-disk"
           contentFit="contain"
-          source={TUTORIAL_IMAGE_ASSETS[currentIndex]}
+          source={imageAssets[currentIndex]}
           style={styles.tutorialImage}
         />
         <Pressable
@@ -84,12 +91,12 @@ const TutorialPanel = ({ onComplete }: TutorialPanelProps) => {
     <View style={styles.confirmOverlay}>
       <View style={styles.confirmCard}>
         <View style={styles.headerRow}>
-          <Text style={styles.headerText}>튜토리얼</Text>
+          <Text style={styles.headerText}>{title}</Text>
           <Pressable onPress={completeTutorial} style={styles.headerButton}>
             <CrossIcon width={24} height={24} fill={colors.BLACK_NORMAL} />
           </Pressable>
         </View>
-        <Text style={styles.messageText}>튜토리얼을 진행하시겠습니까?</Text>
+        <Text style={styles.messageText}>{message}</Text>
         <View style={styles.choiceList}>
           <Pressable onPress={startTutorial} style={styles.choiceButton}>
             {({ pressed }) => (

@@ -12,27 +12,21 @@ import {
 import ProgressBar from "@/components/ProgressBar/ProgressBar";
 import GuestbookModal from "@/components/Room/GuestbookModal";
 import {
-  DEFAULT_EQUIPPED_ROOM_ITEMS,
-  DEFAULT_EQUIPPED_ROOM_WALLPAPER,
   ROOM_CANVAS_ASPECT_RATIO,
-  ROOM_ITEM_ASSETS,
-  ROOM_WALLPAPER_ASSETS,
-  RoomItemId,
-  RoomSlotId,
-  RoomWallpaperId,
 } from "@/components/Room/RoomData";
 import RoomScene from "@/components/Room/RoomScene";
 import SquareButton from "@/components/SquareButton/SquareButton";
 import { colors } from "@/constants/colors";
 import { fonts } from "@/constants/fonts";
 import { useGameStore } from "@/stores/useGameStore";
+import { useRequirePlayableSession } from "@/useHook/useRequirePlayableSession";
 import { startBackgroundMusicSession } from "@/utils/backgroundMusic";
 import {
   createRoomGuestbook,
   getServerApiErrorMessage,
   getUserRoom,
-  RoomView,
 } from "@/utils/serverApi";
+import { mapServerRoomViewToLocalRoomState } from "@/utils/serverRoomAdapter";
 import { playSoundEffect } from "@/utils/soundEffects";
 import { getXpProgressInfo } from "@/utils/xpProgress";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -49,100 +43,9 @@ const ROOM_MAX_WIDTH = 600;
 const PROGRESS_BOTTOM_OFFSET = 38;
 const ROOM_VERTICAL_RESERVED_SPACE = 220;
 
-const normalizeServerRoomItemKey = (value: string) =>
-  value.toLowerCase().replace(/[\s_-]/g, "");
-
-const getLocalRoomItemIdFromServerItem = (
-  serverItem: RoomView["equipped_items"][number]["item"],
-  slotId: RoomSlotId,
-): RoomItemId | null => {
-  const serverNameKey = normalizeServerRoomItemKey(serverItem.name);
-  const serverImageKey = serverItem.image
-    ? normalizeServerRoomItemKey(serverItem.image)
-    : "";
-
-  const matchedEntry = Object.entries(ROOM_ITEM_ASSETS).find(
-    ([itemId, item]) => {
-      if (item.slotId !== slotId) {
-        return false;
-      }
-
-      const itemIdKey = normalizeServerRoomItemKey(itemId);
-      const labelKey = normalizeServerRoomItemKey(item.label);
-
-      return (
-        serverNameKey === itemIdKey ||
-        serverNameKey === labelKey ||
-        serverImageKey.includes(itemIdKey)
-      );
-    },
-  );
-
-  return matchedEntry ? (matchedEntry[0] as RoomItemId) : null;
-};
-
-const getLocalWallpaperIdFromServerItem = (
-  serverItem: RoomView["equipped_items"][number]["item"],
-): RoomWallpaperId | null => {
-  const serverNameKey = normalizeServerRoomItemKey(serverItem.name);
-  const serverImageKey = serverItem.image
-    ? normalizeServerRoomItemKey(serverItem.image)
-    : "";
-
-  const matchedEntry = Object.entries(ROOM_WALLPAPER_ASSETS).find(
-    ([wallpaperId, wallpaper]) => {
-      const wallpaperIdKey = normalizeServerRoomItemKey(wallpaperId);
-      const labelKey = normalizeServerRoomItemKey(wallpaper.label);
-
-      return (
-        serverNameKey === wallpaperIdKey ||
-        serverNameKey === labelKey ||
-        serverImageKey.includes(wallpaperIdKey)
-      );
-    },
-  );
-
-  return matchedEntry ? (matchedEntry[0] as RoomWallpaperId) : null;
-};
-
-const mapServerRoomViewToSnapshot = (
-  roomView: RoomView,
-  fallbackBooName: string,
-) => {
-  const equippedRoomItems = { ...DEFAULT_EQUIPPED_ROOM_ITEMS };
-  let equippedRoomWallpaper = DEFAULT_EQUIPPED_ROOM_WALLPAPER;
-
-  roomView.equipped_items.forEach((equippedItem) => {
-    if (equippedItem.item_type === "wallpaper") {
-      equippedRoomWallpaper =
-        getLocalWallpaperIdFromServerItem(equippedItem.item) ??
-        equippedRoomWallpaper;
-      return;
-    }
-
-    if (
-      equippedItem.item_type === "bed" ||
-      equippedItem.item_type === "closet" ||
-      equippedItem.item_type === "table"
-    ) {
-      const slotId = equippedItem.item_type;
-      equippedRoomItems[slotId] =
-        getLocalRoomItemIdFromServerItem(equippedItem.item, slotId) ??
-        equippedRoomItems[slotId];
-    }
-  });
-
-  return {
-    booName: fallbackBooName,
-    characterState: "basic1" as const,
-    equippedRoomItems,
-    equippedRoomWallpaper,
-    totalXp: 0,
-  };
-};
-
 const FriendRoomIndex = () => {
   const insets = useSafeAreaInsets();
+  useRequirePlayableSession();
   const { height, width } = useWindowDimensions();
   const params = useLocalSearchParams<{
     friendId?: string | string[];
@@ -188,7 +91,12 @@ const FriendRoomIndex = () => {
   const fallbackFriendName = friend?.name ?? friendNameParam ?? "친구";
   const displayFriendName = serverRoom?.owner.nickname ?? fallbackFriendName;
   const roomSnapshot = serverRoom
-    ? mapServerRoomViewToSnapshot(serverRoom, `${displayFriendName}의 부`)
+    ? {
+        ...mapServerRoomViewToLocalRoomState(serverRoom),
+        booName: `${displayFriendName}의 부`,
+        characterState: "basic1" as const,
+        totalXp: 0,
+      }
     : friend && !accessToken
       ? getFriendRoomSnapshot(friend)
       : null;

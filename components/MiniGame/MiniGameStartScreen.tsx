@@ -1,6 +1,6 @@
 /**
  * @description  미니게임별 시작 화면의 공통 UI, 하트 상태, 랭킹 모달을 렌더링합니다.
- * @depends      assets/icons/arrow-back-return.svg, assets/icons/trophy.svg, components/CoinBox/CoinBox.tsx, components/FriendList/FriendListDummyData.ts, components/MainButton/MainButton.tsx, components/MiniGame/HeartCountBadge.tsx, components/MiniGame/MiniGameData.ts, components/MiniGame/MiniGameRankingModal.tsx, components/OutlinedText/OutlinedText.tsx, components/SquareButton/SquareButton.tsx, components/TopAlert/TopAlert.tsx, stores/useGameStore.ts, utils/backgroundMusic.ts
+ * @depends      assets/icons/arrow-back-return.svg, assets/icons/trophy.svg, components/CoinBox/CoinBox.tsx, components/FriendList/FriendListDummyData.ts, components/MainButton/MainButton.tsx, components/MiniGame/BookCatchRuleModal.tsx, components/MiniGame/BooCatchRuleModal.tsx, components/MiniGame/FreeThrowRuleModal.tsx, components/MiniGame/HeartCountBadge.tsx, components/MiniGame/MiniGameData.ts, components/MiniGame/MiniGameRankingModal.tsx, components/OutlinedText/OutlinedText.tsx, components/SquareButton/SquareButton.tsx, components/TopAlert/TopAlert.tsx, stores/useGameStore.ts, utils/backgroundMusic.ts
  * @used-by      app/miniGame/catchTheMajor.tsx, app/miniGame/catchBoo.tsx, app/miniGame/freeThrow.tsx
  * @side-effects miniGameMain BGM 세션 시작, router 이동, TopAlert/랭킹 모달 상태 변경
  */
@@ -10,6 +10,7 @@ import { CHARACTER_IMAGES } from "@/constants/character";
 import CoinBox from "@/components/CoinBox/CoinBox";
 import BookCatchRuleModal from "@/components/MiniGame/BookCatchRuleModal";
 import BooCatchRuleModal from "@/components/MiniGame/BooCatchRuleModal";
+import FreeThrowRuleModal from "@/components/MiniGame/FreeThrowRuleModal";
 import { getFriendMiniGameScore } from "@/components/FriendList/FriendListDummyData";
 import MainButton from "@/components/MainButton/MainButton";
 import HeartCountBadge from "@/components/MiniGame/HeartCountBadge";
@@ -30,9 +31,15 @@ import TopAlert from "@/components/TopAlert/TopAlert";
 import { colors } from "@/constants/colors";
 import { fonts } from "@/constants/fonts";
 import { useGameStore } from "@/stores/useGameStore";
+import { useRequirePlayableSession } from "@/useHook/useRequirePlayableSession";
 import { useSyncServerUserStatsOnFocus } from "@/useHook/useSyncServerUserStatsOnFocus";
 import { startBackgroundMusicSession } from "@/utils/backgroundMusic";
+import {
+  getMyMiniGameRanking,
+  listMyMiniGameResults,
+} from "@/utils/serverApi";
 import { getXpProgressInfo } from "@/utils/xpProgress";
+import { useQuery } from "@tanstack/react-query";
 import { Image } from "expo-image";
 import { router, useFocusEffect } from "expo-router";
 import { StatusBar } from "expo-status-bar";
@@ -55,6 +62,7 @@ type TopAlertState = {
 
 const MiniGameStartScreen = ({ miniGameId }: MiniGameStartScreenProps) => {
   const { width } = useWindowDimensions();
+  useRequirePlayableSession();
   useSyncServerUserStatsOnFocus();
   const miniGame = MINI_GAME_START_SCREEN_REGISTRY[miniGameId];
   const coin = useGameStore((state) => state.coin);
@@ -79,6 +87,20 @@ const MiniGameStartScreen = ({ miniGameId }: MiniGameStartScreenProps) => {
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [fallbackRecoveryStartedAtMs] = useState(() => Date.now());
   const accessToken = useGameStore((state) => state.accessToken);
+  const { data: myMiniGameRanking, isFetching: isRankingFetching } = useQuery({
+    queryKey: ["minigames", "ranking", "me", accessToken],
+    queryFn: () => getMyMiniGameRanking(accessToken ?? undefined),
+    enabled: !!accessToken,
+    staleTime: 1000 * 15,
+    retry: 1,
+  });
+  const { data: myMiniGameResults, isFetching: isResultsFetching } = useQuery({
+    queryKey: ["minigames", "results", "me", accessToken],
+    queryFn: () => listMyMiniGameResults(accessToken ?? undefined),
+    enabled: !!accessToken,
+    staleTime: 1000 * 15,
+    retry: 1,
+  });
 
   const actionButtonWidth = useMemo(() => {
     return Math.min(170, Math.floor((width - 56 - 12) / 2));
@@ -86,7 +108,16 @@ const MiniGameStartScreen = ({ miniGameId }: MiniGameStartScreenProps) => {
 
   const rankingEntries = useMemo<MiniGameRankingEntry[]>(() => {
     if (accessToken) {
-      return [];
+      return (myMiniGameResults ?? [])
+        .filter((result) => result.game_type === miniGame.id)
+        .map((result) => ({
+          friendId: `server-result-${result.result_id}`,
+          name: new Date(result.created_at).toLocaleDateString("ko-KR", {
+            month: "2-digit",
+            day: "2-digit",
+          }),
+          score: result.score,
+        }));
     }
 
     return friendList.map((friend) => ({
@@ -98,7 +129,27 @@ const MiniGameStartScreen = ({ miniGameId }: MiniGameStartScreenProps) => {
         isInfiniteMode ? "infinite" : "normal",
       ),
     }));
-  }, [accessToken, friendList, isInfiniteMode, miniGame.id]);
+  }, [accessToken, friendList, isInfiniteMode, miniGame.id, myMiniGameResults]);
+  const rankingSummary = useMemo(() => {
+    if (!accessToken || !myMiniGameRanking) {
+      return [];
+    }
+
+    const rankLabel =
+      myMiniGameRanking.rank !== null && myMiniGameRanking.rank !== undefined
+        ? `${myMiniGameRanking.rank.toLocaleString()}위`
+        : "순위 없음";
+    const bestScoreLabel =
+      myMiniGameRanking.best_score !== null &&
+      myMiniGameRanking.best_score !== undefined
+        ? `${myMiniGameRanking.best_score.toLocaleString()}P`
+        : "기록 없음";
+
+    return [
+      `내 최고점 ${bestScoreLabel}`,
+      `내 순위 ${rankLabel} / 참여 ${myMiniGameRanking.total_ranked_users.toLocaleString()}명`,
+    ];
+  }, [accessToken, myMiniGameRanking]);
 
   const heartStatus = useMemo(
     () =>
@@ -117,6 +168,7 @@ const MiniGameStartScreen = ({ miniGameId }: MiniGameStartScreenProps) => {
   const heartStatusLabel = heartStatus.isFull
     ? "가득 참"
     : formatMiniGameHeartCountdown(heartStatus.nextHeartRecoveryRemainingMs);
+  const canStartMiniGame = heartStatus.heartCount >= 1;
   const supportsInfiniteMode = miniGame.id === "catchTheMajor";
 
   useFocusEffect(
@@ -189,7 +241,11 @@ const MiniGameStartScreen = ({ miniGameId }: MiniGameStartScreenProps) => {
   };
 
   const handleRulePress = () => {
-    if (miniGame.id !== "catchTheMajor" && miniGame.id !== "catchBoo") {
+    if (
+      miniGame.id !== "catchTheMajor" &&
+      miniGame.id !== "catchBoo" &&
+      miniGame.id !== "freeThrow"
+    ) {
       showReadyAlert();
       return;
     }
@@ -206,10 +262,29 @@ const MiniGameStartScreen = ({ miniGameId }: MiniGameStartScreenProps) => {
   };
 
   const handleGameStartPress = () => {
+    if (!canStartMiniGame) {
+      showTopAlert(
+        "하트 부족",
+        "하트가 1개 이상일 때 플레이할 수 있어요.",
+        {
+          autoHideDuration: 1800,
+          textSize: "compact",
+        },
+      );
+      return;
+    }
+
     if (miniGame.id === "catchBoo") {
       setIsRankingOpen(false);
       setIsRuleOpen(false);
       router.push("/miniGame/catchBooPlay");
+      return;
+    }
+
+    if (miniGame.id === "freeThrow") {
+      setIsRankingOpen(false);
+      setIsRuleOpen(false);
+      router.push("/miniGame/freeThrowPlay");
       return;
     }
 
@@ -333,9 +408,22 @@ const MiniGameStartScreen = ({ miniGameId }: MiniGameStartScreenProps) => {
       </SafeAreaView>
       {isRankingOpen ? (
         <MiniGameRankingModal
+          emptyText={
+            accessToken
+              ? "저장된 내 플레이 기록이 아직 없어요."
+              : "랭킹 데이터가 아직 없어요."
+          }
           entries={rankingEntries}
+          isLoading={isRankingFetching || isResultsFetching}
           onClose={() => setIsRankingOpen(false)}
-          title={isInfiniteMode ? "무한 랭킹" : "랭킹"}
+          summary={rankingSummary}
+          title={
+            accessToken
+              ? "내 기록"
+              : isInfiniteMode
+                ? "무한 랭킹"
+                : "랭킹"
+          }
         />
       ) : null}
       {isRuleOpen && miniGame.id === "catchTheMajor" ? (
@@ -343,6 +431,9 @@ const MiniGameStartScreen = ({ miniGameId }: MiniGameStartScreenProps) => {
       ) : null}
       {isRuleOpen && miniGame.id === "catchBoo" ? (
         <BooCatchRuleModal onClose={() => setIsRuleOpen(false)} />
+      ) : null}
+      {isRuleOpen && miniGame.id === "freeThrow" ? (
+        <FreeThrowRuleModal onClose={() => setIsRuleOpen(false)} />
       ) : null}
     </View>
   );

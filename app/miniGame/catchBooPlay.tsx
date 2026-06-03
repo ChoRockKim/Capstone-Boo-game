@@ -17,6 +17,7 @@ import TopAlert from "@/components/TopAlert/TopAlert";
 import { colors } from "@/constants/colors";
 import { fonts } from "@/constants/fonts";
 import { useGameStore } from "@/stores/useGameStore";
+import { useRequirePlayableSession } from "@/useHook/useRequirePlayableSession";
 import { startBackgroundMusicSession } from "@/utils/backgroundMusic";
 import {
   createMiniGameResult,
@@ -362,8 +363,12 @@ const BooCatchScoreFeedback = memo(({ feedback }: BooCatchScoreFeedbackProps) =>
 BooCatchScoreFeedback.displayName = "BooCatchScoreFeedback";
 
 const CatchBooPlayScreen = () => {
+  const canPlayMiniGame = useRequirePlayableSession();
   const accessToken = useGameStore((state) => state.accessToken);
   const adjustCoin = useGameStore((state) => state.adjustCoin);
+  const consumeMiniGameHeart = useGameStore(
+    (state) => state.consumeMiniGameHeart,
+  );
   const friendList = useGameStore((state) => state.friendList);
   const setGameState = useGameStore((state) => state.setGameState);
   const [gameAreaSize, setGameAreaSize] = useState({ height: 0, width: 0 });
@@ -440,7 +445,7 @@ const CatchBooPlayScreen = () => {
   }, []);
 
   useEffect(() => {
-    if (!hasGameArea || gamePhase !== "preparing") {
+    if (!canPlayMiniGame || !hasGameArea || gamePhase !== "preparing") {
       return;
     }
 
@@ -454,19 +459,35 @@ const CatchBooPlayScreen = () => {
     setScoreFeedbacks([]);
     setRemainingSeconds(30);
     setScore(0);
-  }, [gamePhase, hasGameArea]);
+  }, [canPlayMiniGame, gamePhase, hasGameArea]);
 
   useEffect(() => {
-    if (!hasGameArea || !areAssetsReady || gamePhase !== "preparing") {
+    if (
+      !canPlayMiniGame ||
+      !hasGameArea ||
+      !areAssetsReady ||
+      gamePhase !== "preparing"
+    ) {
+      return;
+    }
+
+    if (!consumeMiniGameHeart()) {
+      router.replace("/miniGame/catchBoo");
       return;
     }
 
     setCountdownValue(3);
     setGamePhase("countdown");
-  }, [areAssetsReady, gamePhase, hasGameArea]);
+  }, [
+    areAssetsReady,
+    canPlayMiniGame,
+    consumeMiniGameHeart,
+    gamePhase,
+    hasGameArea,
+  ]);
 
   useEffect(() => {
-    if (gamePhase !== "countdown") {
+    if (!canPlayMiniGame || gamePhase !== "countdown") {
       return;
     }
 
@@ -488,7 +509,7 @@ const CatchBooPlayScreen = () => {
     return () => {
       clearInterval(countdownTimer);
     };
-  }, [gamePhase]);
+  }, [canPlayMiniGame, gamePhase]);
 
   useEffect(() => {
     if (gamePhase !== "playing" || !hasGameArea) {
@@ -709,6 +730,11 @@ const CatchBooPlayScreen = () => {
   };
 
   const handleRestartPress = () => {
+    if (!consumeMiniGameHeart()) {
+      router.replace("/miniGame/catchBoo");
+      return;
+    }
+
     resetRoundState();
     setCountdownValue(3);
     setGamePhase("countdown");

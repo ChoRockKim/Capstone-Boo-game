@@ -4,10 +4,10 @@
  * @used-by      expo-router/entry
  * @side-effects titleLogin BGM 세션 시작, 로그인/회원가입 패널 UI 상태 변경
  */
-import { colors } from "@/constants/colors";
 import Login from "@/components/Login/Login";
 import MainButton from "@/components/MainButton/MainButton";
 import RegisterContainer from "@/components/Register/RegisterContainer";
+import { colors } from "@/constants/colors";
 import { useGameStore } from "@/stores/useGameStore";
 import { startBackgroundMusicSession } from "@/utils/backgroundMusic";
 import { Image } from "expo-image";
@@ -25,8 +25,10 @@ export default function Index() {
   );
   const accessToken = useGameStore((state) => state.accessToken);
   const autoLoginEnabled = useGameStore((state) => state.autoLoginEnabled);
+  const isGuestMode = useGameStore((state) => state.isGuestMode);
+  const startGuestMode = useGameStore((state) => state.startGuestMode);
   const shouldSkipLoginScreen =
-    hasHydratedStore && autoLoginEnabled && !!accessToken;
+    hasHydratedStore && ((autoLoginEnabled && !!accessToken) || isGuestMode);
 
   useEffect(() => {
     if (hasHydratedStore) {
@@ -85,21 +87,36 @@ export default function Index() {
           />
         </View>
         {/* 버튼 부분 */}
-        <View style={[styles.buttonContainer, { bottom: 68 }]}>
-          <MainButton
-            onPress={() => {
-              setIsRegisterOpen(true);
-            }}
-            color="gray"
-            label="회원가입"
-            width={156}
-          />
-          <MainButton
-            onPress={() => setIsLoginOpen(true)}
-            color="blue"
-            label="로그인"
-            width={156}
-          />
+        <View style={[styles.buttonArea, { bottom: 68 }]}>
+          <View style={styles.guestButtonOverlay}>
+            <MainButton
+              onPress={() => {
+                startGuestMode();
+                router.replace("/game");
+              }}
+              color="gray"
+              label="게스트로 시작"
+              size="S"
+              width={156}
+              height={48}
+            />
+          </View>
+          <View style={styles.buttonContainer}>
+            <MainButton
+              onPress={() => {
+                setIsRegisterOpen(true);
+              }}
+              color="gray"
+              label="회원가입"
+              width={156}
+            />
+            <MainButton
+              onPress={() => setIsLoginOpen(true)}
+              color="blue"
+              label="로그인"
+              width={156}
+            />
+          </View>
         </View>
       </SafeAreaView>
       {(isRegisterOpen || isLoginOpen) && (
@@ -123,14 +140,23 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.GRAY_NORMAL,
   },
-  buttonContainer: {
+  buttonArea: {
     position: "absolute",
     left: 0,
     right: 0,
+    alignItems: "center",
+  },
+  buttonContainer: {
     flexDirection: "row",
     gap: 8,
     justifyContent: "center",
     alignItems: "center",
+  },
+  guestButtonOverlay: {
+    position: "absolute",
+    left: "50%",
+    top: -58,
+    marginLeft: 4,
   },
   dimOverlay: {
     ...StyleSheet.absoluteFill,

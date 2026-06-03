@@ -36,12 +36,19 @@ import {
   RoomSlotId,
   RoomWallpaperId,
 } from "@/components/Room/RoomData";
+import {
+  ACHIEVEMENT_DEFINITIONS,
+  type AchievementReward,
+  type AchievementSkinKey,
+  type UnlockedAchievement,
+} from "@/constants/achievements";
 import { CharacterGrade, CharacterState } from "@/constants/character";
 import {
   setBooApiAccessToken,
   setBooApiTokenRefreshHandlers,
   updateCharacter,
 } from "@/utils/serverApi";
+import { consumeMiniGameHeart } from "@/utils/miniGameHeart";
 import { getTotalXpForGrade, getXpProgressInfo } from "@/utils/xpProgress";
 import { create } from "zustand";
 import { createJSONStorage, persist, StateStorage } from "zustand/middleware";
@@ -108,10 +115,23 @@ export type GuestbookEntry = {
 
 export type GuestbookEntriesByFriendId = Record<string, GuestbookEntry[]>;
 
+export type AchievementStats = {
+  feedCount: number;
+  friendAddCount: number;
+  hasFirstLogin: boolean;
+  hasVisitedCampus: boolean;
+  hasEnteredRoom: boolean;
+  miniGamePlayCount: number;
+  quizCorrectCount: number;
+  roomItemEquipCount: number;
+};
+
 type GameStoreState = {
   accessToken: string | null;
   appliedSkippedMealPenaltyCount: number;
   autoLoginEnabled: boolean;
+  achievementAlertQueue: UnlockedAchievement[];
+  achievementStats: AchievementStats;
   booName: string;
   characterState: CharacterState;
   coin: number;
@@ -121,8 +141,10 @@ type GameStoreState = {
   friendList: FriendListItem[];
   guestbookEntries: GuestbookEntriesByFriendId;
   hasSeenGameTutorial: boolean;
+  hasSeenMiniGameTutorial: boolean;
   heart: number;
   heartUpdatedAt: string | null;
+  isGuestMode: boolean;
   lastFedMeals: MealHistory;
   lastFedMealSlotIndex: number;
   masterVolume: number;
@@ -131,7 +153,9 @@ type GameStoreState = {
   mealRestrictionEnabled: boolean;
   ownedRoomItems: RoomItemId[];
   ownedRoomWallpapers: RoomWallpaperId[];
+  ownedAchievementSkins: AchievementSkinKey[];
   pendingEvolution: PendingEvolution | null;
+  completedAchievementKeys: string[];
   quizAttemptHistory: QuizAttemptHistory;
   quizDailyCount: number;
   quizDailyCountDateKey: string;
@@ -163,24 +187,31 @@ type GameStoreActions = {
   ) => GuestbookEntry | null;
   applyServerMealFeed: (result: {
     coin: number;
+    countAchievement?: boolean;
     mealSectionId: MealSectionId | null;
     totalXp: number;
   }) => void;
   applyServerQuizSubmit: (result: {
     coin: number;
-    quizId: string;
+    countAchievement?: boolean;
+    isCorrect: boolean;
     totalXp: number;
   }) => void;
   clearPendingEvolution: () => void;
   clearAuthSession: () => void;
   clearMealHistory: () => void;
   clearQuizHistory: () => void;
+  consumeMiniGameHeart: (nowMs?: number) => boolean;
+  dismissAchievementAlert: () => void;
   feedBoo: (mealCost: number, mealSectionId: MealSectionId | null) => boolean;
   purchaseRoomItem: (itemId: RoomItemId) => RoomItemPurchaseResult;
   purchaseRoomWallpaper: (
     wallpaperId: RoomWallpaperId,
   ) => RoomWallpaperPurchaseResult;
   removeFriend: (friendId: string) => void;
+  recordCampusVisit: () => void;
+  recordRoomEnter: () => void;
+  recordRoomItemEquip: () => void;
   resetGameState: () => void;
   setAuthSession: (session: {
     accessToken: string;
@@ -194,8 +225,12 @@ type GameStoreActions = {
   setEquippedRoomItem: (slotId: RoomSlotId, itemId: RoomItemId) => void;
   setEquippedRoomWallpaper: (wallpaperId: RoomWallpaperId) => void;
   setFriendList: (friendList: FriendListItem[]) => void;
-  setGameState: (patch: Partial<GameStoreState>) => void;
+  setGameState: (
+    patch: Partial<GameStoreState>,
+    options?: { resolveAchievements?: boolean },
+  ) => void;
   setHasSeenGameTutorial: (hasSeenGameTutorial: boolean) => void;
+  setHasSeenMiniGameTutorial: (hasSeenMiniGameTutorial: boolean) => void;
   setMasterVolume: (volume: number) => void;
   setGrade: (grade: CharacterGrade) => void;
   setBgmVolume: (volume: number) => void;
@@ -208,6 +243,7 @@ type GameStoreActions = {
   setUserEmail: (userEmail: string) => void;
   setUserName: (userName: string) => void;
   setUserNickname: (userNickname: string) => void;
+  startGuestMode: () => void;
   submitQuizAttempt: (
     quizId: string,
     isCorrect: boolean,
@@ -237,6 +273,17 @@ const createInitialGameState = (): GameStoreState => ({
   accessToken: null,
   appliedSkippedMealPenaltyCount: 0,
   autoLoginEnabled: false,
+  achievementAlertQueue: [],
+  achievementStats: {
+    feedCount: 0,
+    friendAddCount: 0,
+    hasFirstLogin: false,
+    hasVisitedCampus: false,
+    hasEnteredRoom: false,
+    miniGamePlayCount: 0,
+    quizCorrectCount: 0,
+    roomItemEquipCount: 0,
+  },
   userName: "김외대",
   booName: "부",
   coin: 100,
@@ -246,8 +293,10 @@ const createInitialGameState = (): GameStoreState => ({
   friendList: [],
   guestbookEntries: {},
   hasSeenGameTutorial: false,
+  hasSeenMiniGameTutorial: false,
   heart: 5,
   heartUpdatedAt: null,
+  isGuestMode: false,
   characterState: DEFAULT_CHARACTER_STATE,
   lastFedMeals: {},
   lastFedMealSlotIndex: getLatestCompletedMealSlotIndex(),
@@ -257,7 +306,9 @@ const createInitialGameState = (): GameStoreState => ({
   mealRestrictionEnabled: true,
   ownedRoomItems: [...DEFAULT_OWNED_ROOM_ITEMS],
   ownedRoomWallpapers: [...DEFAULT_OWNED_ROOM_WALLPAPERS],
+  ownedAchievementSkins: [],
   pendingEvolution: null,
+  completedAchievementKeys: [],
   quizAttemptHistory: {},
   quizDailyCount: 0,
   quizDailyCountDateKey: "",
@@ -336,6 +387,130 @@ const createPendingEvolution = ({
   };
 };
 
+const getAchievementProgressValue = (
+  state: GameStoreState,
+  conditionType: (typeof ACHIEVEMENT_DEFINITIONS)[number]["conditionType"],
+) => {
+  switch (conditionType) {
+    case "achievement_completed_count":
+      return state.completedAchievementKeys.length;
+    case "campus_first_visit":
+      return state.achievementStats.hasVisitedCampus ? 1 : 0;
+    case "feed_count":
+      return state.achievementStats.feedCount;
+    case "first_login":
+      return state.achievementStats.hasFirstLogin ? 1 : 0;
+    case "friend_count":
+      return Math.max(
+        state.achievementStats.friendAddCount,
+        state.friendList.length,
+      );
+    case "minigame_play_count":
+      return state.achievementStats.miniGamePlayCount;
+    case "quiz_correct_count":
+      return state.achievementStats.quizCorrectCount;
+    case "room_first_enter":
+      return state.achievementStats.hasEnteredRoom ? 1 : 0;
+    case "room_item_equip_count":
+      return state.achievementStats.roomItemEquipCount;
+    case "total_xp":
+      return state.totalXp;
+  }
+};
+
+const resolveAchievementRewards = (
+  nextState: GameStoreState,
+  unlockedAt = new Date().toISOString(),
+): Partial<GameStoreState> => {
+  let completedAchievementKeys = [...nextState.completedAchievementKeys];
+  let coin = nextState.coin;
+  let totalXp = nextState.totalXp;
+  let pendingEvolution = nextState.pendingEvolution;
+  let ownedAchievementSkins = [...nextState.ownedAchievementSkins];
+  const unlockedAchievements: UnlockedAchievement[] = [];
+  let didUnlockAchievement = true;
+
+  while (didUnlockAchievement) {
+    didUnlockAchievement = false;
+
+    const completedKeySet = new Set(completedAchievementKeys);
+    const stateForProgress = {
+      ...nextState,
+      completedAchievementKeys,
+      coin,
+      ownedAchievementSkins,
+      pendingEvolution,
+      totalXp,
+    };
+
+    ACHIEVEMENT_DEFINITIONS.forEach((achievement) => {
+      if (
+        completedKeySet.has(achievement.key) ||
+        getAchievementProgressValue(stateForProgress, achievement.conditionType) <
+          achievement.targetValue
+      ) {
+        return;
+      }
+
+      didUnlockAchievement = true;
+      completedKeySet.add(achievement.key);
+      completedAchievementKeys = [...completedAchievementKeys, achievement.key];
+
+      const reward = achievement.reward as AchievementReward;
+
+      if (reward.coin) {
+        coin += reward.coin;
+      }
+
+      if (reward.xp) {
+        const nextTotalXp = Math.max(totalXp + reward.xp, 0);
+
+        pendingEvolution = createPendingEvolution({
+          currentPendingEvolution: pendingEvolution,
+          currentTotalXp: totalXp,
+          nextTotalXp,
+          resumeState: nextState.characterState,
+          trigger: "xp",
+        });
+        totalXp = nextTotalXp;
+      }
+
+      if (
+        reward.skinKey &&
+        !ownedAchievementSkins.includes(reward.skinKey)
+      ) {
+        ownedAchievementSkins = [
+          ...ownedAchievementSkins,
+          reward.skinKey,
+        ];
+      }
+
+      unlockedAchievements.push({
+        key: achievement.key,
+        reward,
+        title: achievement.title,
+        unlockedAt,
+      });
+    });
+  }
+
+  if (unlockedAchievements.length === 0) {
+    return nextState;
+  }
+
+  return {
+    achievementAlertQueue: [
+      ...nextState.achievementAlertQueue,
+      ...unlockedAchievements,
+    ],
+    completedAchievementKeys,
+    coin,
+    ownedAchievementSkins,
+    pendingEvolution,
+    totalXp,
+  };
+};
+
 const resolvePersistStorage = (): StateStorage => {
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -372,16 +547,21 @@ export const useGameStore = create<GameStore>()(
       adjustXp: (delta) =>
         set((state) => {
           const nextTotalXp = Math.max(state.totalXp + delta, 0);
-
-          return {
+          const nextState = {
+            ...state,
             pendingEvolution: createPendingEvolution({
               currentPendingEvolution: state.pendingEvolution,
               currentTotalXp: state.totalXp,
               nextTotalXp,
               resumeState: state.characterState,
-              trigger: "xp",
+              trigger: "xp" as const,
             }),
             totalXp: nextTotalXp,
+          };
+
+          return {
+            ...nextState,
+            ...resolveAchievementRewards(nextState),
           };
         }),
       addSkippedMealForTest: () => {
@@ -446,8 +626,18 @@ export const useGameStore = create<GameStore>()(
             return state;
           }
 
-          return {
+          const nextState = {
+            ...state,
+            achievementStats: {
+              ...state.achievementStats,
+              friendAddCount: state.achievementStats.friendAddCount + 1,
+            },
             friendList: [...state.friendList, friend],
+          };
+
+          return {
+            ...nextState,
+            ...resolveAchievementRewards(nextState),
           };
         }),
       addGuestbookEntry: (friendId, message, createdAt = new Date()) => {
@@ -475,7 +665,12 @@ export const useGameStore = create<GameStore>()(
 
         return entry;
       },
-      applyServerMealFeed: ({ coin, mealSectionId, totalXp }) => {
+      applyServerMealFeed: ({
+        coin,
+        countAchievement = true,
+        mealSectionId,
+        totalXp,
+      }) => {
         const todayKey = getLocalDateKey();
         const lastFedMealSlotIndex = mealSectionId
           ? getMealSlotIndex(new Date(), mealSectionId)
@@ -483,9 +678,17 @@ export const useGameStore = create<GameStore>()(
 
         clearEatingTimeout();
 
-        set((state) => ({
+        set((state) => {
+          const nextState = {
+            ...state,
+            achievementStats: {
+              ...state.achievementStats,
+              feedCount: countAchievement
+                ? state.achievementStats.feedCount + 1
+                : state.achievementStats.feedCount,
+            },
           appliedSkippedMealPenaltyCount: 0,
-          characterState: "eating",
+          characterState: "eating" as CharacterState,
           coin: Math.max(coin, 0),
           lastFedMealSlotIndex,
           lastFedMeals: mealSectionId
@@ -504,18 +707,36 @@ export const useGameStore = create<GameStore>()(
           }),
           skippedMealCount: 0,
           totalXp: Math.max(totalXp, 0),
-        }));
+          };
+
+          return {
+            ...nextState,
+            ...resolveAchievementRewards(nextState),
+          };
+        });
 
         eatingTimeoutRef = setTimeout(() => {
           eatingTimeoutRef = null;
           get().syncMealStatus(false);
         }, EATING_DURATION_MS);
       },
-      applyServerQuizSubmit: ({ coin, quizId, totalXp }) => {
-        const attemptedAt = new Date();
+      applyServerQuizSubmit: ({
+        coin,
+        countAchievement = true,
+        isCorrect,
+        totalXp,
+      }) => {
         const nextTotalXp = Math.max(totalXp, 0);
 
-        set((state) => ({
+        set((state) => {
+          const nextState = {
+            ...state,
+            achievementStats: {
+              ...state.achievementStats,
+              quizCorrectCount: countAchievement && isCorrect
+                ? state.achievementStats.quizCorrectCount + 1
+                : state.achievementStats.quizCorrectCount,
+            },
           coin: Math.max(coin, 0),
           pendingEvolution: createPendingEvolution({
             currentPendingEvolution: state.pendingEvolution,
@@ -524,19 +745,14 @@ export const useGameStore = create<GameStore>()(
             resumeState: state.characterState,
             trigger: "quiz",
           }),
-          quizAttemptHistory: {
-            ...state.quizAttemptHistory,
-            [quizId]: attemptedAt.toISOString(),
-          },
-          quizDailyCount:
-            getQuizDailyCountForDate(
-              state.quizDailyCount,
-              state.quizDailyCountDateKey,
-              attemptedAt,
-            ) + 1,
-          quizDailyCountDateKey: getQuizLocalDateKey(attemptedAt),
           totalXp: nextTotalXp,
-        }));
+          };
+
+          return {
+            ...nextState,
+            ...resolveAchievementRewards(nextState),
+          };
+        });
       },
       clearPendingEvolution: () => set({ pendingEvolution: null }),
       clearAuthSession: () => {
@@ -545,6 +761,7 @@ export const useGameStore = create<GameStore>()(
         set({
           accessToken: null,
           autoLoginEnabled: false,
+          isGuestMode: false,
           refreshToken: null,
         });
       },
@@ -574,6 +791,45 @@ export const useGameStore = create<GameStore>()(
           quizDailyCountDateKey: "",
         });
       },
+      consumeMiniGameHeart: (nowMs = Date.now()) => {
+        let didConsumeHeart = false;
+
+        set((state) => {
+          const nextHeartState = consumeMiniGameHeart(
+            {
+              heart: state.heart,
+              heartUpdatedAt: state.heartUpdatedAt,
+              maxHeart: state.maxHeart,
+            },
+            nowMs,
+          );
+
+          if (!nextHeartState) {
+            return state;
+          }
+
+          didConsumeHeart = true;
+          const nextState = {
+            ...state,
+            ...nextHeartState,
+            achievementStats: {
+              ...state.achievementStats,
+              miniGamePlayCount: state.achievementStats.miniGamePlayCount + 1,
+            },
+          };
+
+          return {
+            ...nextState,
+            ...resolveAchievementRewards(nextState),
+          };
+        });
+
+        return didConsumeHeart;
+      },
+      dismissAchievementAlert: () =>
+        set((state) => ({
+          achievementAlertQueue: state.achievementAlertQueue.slice(1),
+        })),
       purchaseRoomItem: (itemId) => {
         const item = ROOM_ITEM_ASSETS[itemId];
 
@@ -600,14 +856,26 @@ export const useGameStore = create<GameStore>()(
           };
         }
 
-        set((state) => ({
+        set((state) => {
+          const nextState = {
+            ...state,
+            achievementStats: {
+              ...state.achievementStats,
+              roomItemEquipCount: state.achievementStats.roomItemEquipCount + 1,
+            },
           coin: coin - item.price,
           equippedRoomItems: {
             ...state.equippedRoomItems,
             [item.slotId]: itemId,
           },
           ownedRoomItems: [...ownedRoomItems, itemId],
-        }));
+          };
+
+          return {
+            ...nextState,
+            ...resolveAchievementRewards(nextState),
+          };
+        });
 
         return {
           ok: true as const,
@@ -639,10 +907,22 @@ export const useGameStore = create<GameStore>()(
           };
         }
 
-        set({
+        set((state) => {
+          const nextState = {
+            ...state,
+            achievementStats: {
+              ...state.achievementStats,
+              roomItemEquipCount: state.achievementStats.roomItemEquipCount + 1,
+            },
           coin: coin - wallpaper.price,
           equippedRoomWallpaper: wallpaperId,
           ownedRoomWallpapers: [...ownedRoomWallpapers, wallpaperId],
+          };
+
+          return {
+            ...nextState,
+            ...resolveAchievementRewards(nextState),
+          };
         });
 
         return {
@@ -651,12 +931,39 @@ export const useGameStore = create<GameStore>()(
       },
       syncMealStatus: (preserveEatingState = true) => {
         const {
+          accessToken,
           appliedSkippedMealPenaltyCount,
           characterState,
           lastFedMealSlotIndex,
           totalXp,
         } = get();
         const latestCompletedMealSlotIndex = getLatestCompletedMealSlotIndex();
+
+        if (accessToken) {
+          const shouldStayEating =
+            preserveEatingState && characterState === "eating";
+          const normalizedCharacterState =
+            normalizeEvolutionResumeState(characterState);
+          const nextCharacterState = shouldStayEating
+            ? "eating"
+            : normalizedCharacterState === "hungry" ||
+                normalizedCharacterState === "eating"
+              ? DEFAULT_CHARACTER_STATE
+              : normalizedCharacterState;
+
+          set({
+            appliedSkippedMealPenaltyCount: 0,
+            characterState: nextCharacterState,
+            lastFedMealSlotIndex: latestCompletedMealSlotIndex,
+            skippedMealCount: 0,
+          });
+
+          return {
+            skippedMealCount: 0,
+            xpPenalty: 0,
+          };
+        }
+
         const skippedMealCount = Math.max(
           latestCompletedMealSlotIndex - lastFedMealSlotIndex,
           0,
@@ -721,10 +1028,16 @@ export const useGameStore = create<GameStore>()(
 
         clearEatingTimeout();
 
-        set((state) => ({
+        set((state) => {
+          const nextState = {
+            ...state,
+            achievementStats: {
+              ...state.achievementStats,
+              feedCount: state.achievementStats.feedCount + 1,
+            },
           appliedSkippedMealPenaltyCount: 0,
           coin: coin - mealCost,
-          characterState: "eating",
+          characterState: "eating" as CharacterState,
           lastFedMealSlotIndex,
           skippedMealCount: 0,
           pendingEvolution: createPendingEvolution({
@@ -742,7 +1055,13 @@ export const useGameStore = create<GameStore>()(
                 [mealSectionId]: todayKey,
               }
             : state.lastFedMeals,
-        }));
+          };
+
+          return {
+            ...nextState,
+            ...resolveAchievementRewards(nextState),
+          };
+        });
 
         eatingTimeoutRef = setTimeout(() => {
           eatingTimeoutRef = null;
@@ -792,10 +1111,18 @@ export const useGameStore = create<GameStore>()(
           ? QUIZ_CORRECT_XP_REWARD
           : -QUIZ_WRONG_XP_PENALTY;
 
-        set((state) => ({
+        set((state) => {
+          const nextState = {
+            ...state,
           coin: isCorrect
             ? state.coin + QUIZ_CORRECT_COIN_REWARD
             : state.coin,
+          achievementStats: {
+            ...state.achievementStats,
+            quizCorrectCount: isCorrect
+              ? state.achievementStats.quizCorrectCount + 1
+              : state.achievementStats.quizCorrectCount,
+          },
           pendingEvolution: createPendingEvolution({
             currentPendingEvolution: state.pendingEvolution,
             currentTotalXp: totalXp,
@@ -810,7 +1137,13 @@ export const useGameStore = create<GameStore>()(
           quizDailyCount: quizCountToday + 1,
           quizDailyCountDateKey: getQuizLocalDateKey(attemptedAt),
           totalXp: Math.max(totalXp + xpDelta, 0),
-        }));
+          };
+
+          return {
+            ...nextState,
+            ...resolveAchievementRewards(nextState),
+          };
+        });
 
         return {
           coinDelta: isCorrect ? QUIZ_CORRECT_COIN_REWARD : 0,
@@ -822,10 +1155,23 @@ export const useGameStore = create<GameStore>()(
       setAuthSession: ({ accessToken, autoLoginEnabled, refreshToken }) => {
         setBooApiAccessToken(accessToken);
 
-        set({
-          accessToken,
-          autoLoginEnabled,
-          refreshToken,
+        set((state) => {
+          const nextState = {
+            ...state,
+            accessToken,
+            achievementStats: {
+              ...state.achievementStats,
+              hasFirstLogin: true,
+            },
+            autoLoginEnabled,
+            isGuestMode: false,
+            refreshToken,
+          };
+
+          return {
+            ...nextState,
+            ...resolveAchievementRewards(nextState),
+          };
         });
       },
       setBooName: (booName) => {
@@ -848,34 +1194,58 @@ export const useGameStore = create<GameStore>()(
         set((state) => {
           if (
             ROOM_ITEM_ASSETS[itemId]?.slotId !== slotId ||
-            !state.ownedRoomItems.includes(itemId)
+            !state.ownedRoomItems.includes(itemId) ||
+            state.equippedRoomItems[slotId] === itemId
           ) {
             return state;
           }
 
-          return {
+          const nextState = {
+            ...state,
+            achievementStats: {
+              ...state.achievementStats,
+              roomItemEquipCount: state.achievementStats.roomItemEquipCount + 1,
+            },
             equippedRoomItems: {
               ...state.equippedRoomItems,
               [slotId]: itemId,
             },
+          };
+
+          return {
+            ...nextState,
+            ...resolveAchievementRewards(nextState),
           };
         }),
       setEquippedRoomWallpaper: (wallpaperId) =>
         set((state) => {
           if (
             !ROOM_WALLPAPER_ASSETS[wallpaperId] ||
-            !state.ownedRoomWallpapers.includes(wallpaperId)
+            !state.ownedRoomWallpapers.includes(wallpaperId) ||
+            state.equippedRoomWallpaper === wallpaperId
           ) {
             return state;
           }
 
-          return {
+          const nextState = {
+            ...state,
+            achievementStats: {
+              ...state.achievementStats,
+              roomItemEquipCount: state.achievementStats.roomItemEquipCount + 1,
+            },
             equippedRoomWallpaper: wallpaperId,
+          };
+
+          return {
+            ...nextState,
+            ...resolveAchievementRewards(nextState),
           };
         }),
       setFriendList: (friendList) => set({ friendList }),
       setHasSeenGameTutorial: (hasSeenGameTutorial) =>
         set({ hasSeenGameTutorial }),
+      setHasSeenMiniGameTutorial: (hasSeenMiniGameTutorial) =>
+        set({ hasSeenMiniGameTutorial }),
       setMasterVolume: (masterVolume) =>
         set({ masterVolume: clampVolume(masterVolume) }),
       setGrade: (grade) => set({ totalXp: getTotalXpForGrade(grade) }),
@@ -897,23 +1267,103 @@ export const useGameStore = create<GameStore>()(
             (friend) => friend.id !== friendId,
           ),
         })),
+      recordCampusVisit: () =>
+        set((state) => {
+          if (state.achievementStats.hasVisitedCampus) {
+            return state;
+          }
+
+          const nextState = {
+            ...state,
+            achievementStats: {
+              ...state.achievementStats,
+              hasVisitedCampus: true,
+            },
+          };
+
+          return {
+            ...nextState,
+            ...resolveAchievementRewards(nextState),
+          };
+        }),
+      recordRoomEnter: () =>
+        set((state) => {
+          if (state.achievementStats.hasEnteredRoom) {
+            return state;
+          }
+
+          const nextState = {
+            ...state,
+            achievementStats: {
+              ...state.achievementStats,
+              hasEnteredRoom: true,
+            },
+          };
+
+          return {
+            ...nextState,
+            ...resolveAchievementRewards(nextState),
+          };
+        }),
+      recordRoomItemEquip: () =>
+        set((state) => {
+          const nextState = {
+            ...state,
+            achievementStats: {
+              ...state.achievementStats,
+              roomItemEquipCount: state.achievementStats.roomItemEquipCount + 1,
+            },
+          };
+
+          return {
+            ...nextState,
+            ...resolveAchievementRewards(nextState),
+          };
+        }),
       setSfxVolume: (sfxVolume) => set({ sfxVolume: clampVolume(sfxVolume) }),
       setStudentId: (studentId) => set({ studentId }),
       setUserEmail: (userEmail) => set({ userEmail }),
       setUserNickname: (userNickname) => set({ userNickname }),
+      startGuestMode: () => {
+        setBooApiAccessToken(null);
+
+        const {
+          bgmVolume,
+          developerModeEnabled,
+          masterVolume,
+          sfxVolume,
+        } = get();
+
+        set({
+          ...createInitialGameState(),
+          accessToken: null,
+          autoLoginEnabled: false,
+          bgmVolume,
+          developerModeEnabled,
+          isGuestMode: true,
+          masterVolume,
+          refreshToken: null,
+          sfxVolume,
+        });
+      },
       setTotalXp: (totalXp) =>
         set((state) => {
           const nextTotalXp = Math.max(totalXp, 0);
-
-          return {
+          const nextState = {
+            ...state,
             pendingEvolution: createPendingEvolution({
               currentPendingEvolution: state.pendingEvolution,
               currentTotalXp: state.totalXp,
               nextTotalXp,
               resumeState: state.characterState,
-              trigger: "xp",
+              trigger: "xp" as const,
             }),
             totalXp: nextTotalXp,
+          };
+
+          return {
+            ...nextState,
+            ...resolveAchievementRewards(nextState),
           };
         }),
       toggleQuizDailyLimitEnabled: () =>
@@ -928,7 +1378,22 @@ export const useGameStore = create<GameStore>()(
         set((state) => ({
           developerModeEnabled: !state.developerModeEnabled,
         })),
-      setGameState: (patch) => set((state) => ({ ...state, ...patch })),
+      setGameState: (patch, options = {}) =>
+        set((state) => {
+          const nextState = { ...state, ...patch };
+
+          if (
+            patch.totalXp === undefined ||
+            options.resolveAchievements === false
+          ) {
+            return nextState;
+          }
+
+          return {
+            ...nextState,
+            ...resolveAchievementRewards(nextState),
+          };
+        }),
       resetGameState: () => {
         clearEatingTimeout();
         set({
@@ -937,6 +1402,7 @@ export const useGameStore = create<GameStore>()(
           autoLoginEnabled: get().autoLoginEnabled,
           bgmVolume: get().bgmVolume,
           developerModeEnabled: get().developerModeEnabled,
+          isGuestMode: get().isGuestMode,
           masterVolume: get().masterVolume,
           refreshToken: get().refreshToken,
           sfxVolume: get().sfxVolume,
@@ -950,23 +1416,28 @@ export const useGameStore = create<GameStore>()(
         accessToken: state.autoLoginEnabled ? state.accessToken : null,
         appliedSkippedMealPenaltyCount: state.appliedSkippedMealPenaltyCount,
         autoLoginEnabled: state.autoLoginEnabled,
+        achievementStats: state.achievementStats,
         booName: state.booName,
         characterState: state.characterState,
         coin: state.coin,
+        completedAchievementKeys: state.completedAchievementKeys,
         developerModeEnabled: state.developerModeEnabled,
         equippedRoomItems: state.equippedRoomItems,
         equippedRoomWallpaper: state.equippedRoomWallpaper,
         friendList: state.friendList,
         guestbookEntries: state.guestbookEntries,
         hasSeenGameTutorial: state.hasSeenGameTutorial,
+        hasSeenMiniGameTutorial: state.hasSeenMiniGameTutorial,
         heart: state.heart,
         heartUpdatedAt: state.heartUpdatedAt,
+        isGuestMode: state.isGuestMode,
         lastFedMeals: state.lastFedMeals,
         lastFedMealSlotIndex: state.lastFedMealSlotIndex,
         masterVolume: state.masterVolume,
         maxHeart: state.maxHeart,
         mealDayMode: state.mealDayMode,
         mealRestrictionEnabled: state.mealRestrictionEnabled,
+        ownedAchievementSkins: state.ownedAchievementSkins,
         ownedRoomItems: state.ownedRoomItems,
         ownedRoomWallpapers: state.ownedRoomWallpapers,
         quizAttemptHistory: state.quizAttemptHistory,
@@ -996,6 +1467,7 @@ export const useGameStore = create<GameStore>()(
 
         if (state.autoLoginEnabled && state.accessToken) {
           setBooApiAccessToken(state.accessToken);
+          state.setGameState({ isGuestMode: false });
         } else {
           setBooApiAccessToken(null);
           state.setGameState({
@@ -1027,6 +1499,7 @@ export const useGameStore = create<GameStore>()(
         );
 
         state.setGameState({
+          achievementAlertQueue: [],
           equippedRoomItems,
           ownedRoomItems: [...ownedRoomItems].filter(
             (itemId) => !!ROOM_ITEM_ASSETS[itemId],

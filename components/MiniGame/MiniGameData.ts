@@ -147,6 +147,14 @@ export const MINI_GAME_PLACE_OPTIONS = [
   },
 ] as const;
 
+export const MINI_GAME_DEFAULT_PLACE_ID = "mainBuilding";
+export const MINI_GAME_DEFAULT_PLACE_INDEX = Math.max(
+  MINI_GAME_PLACE_OPTIONS.findIndex(
+    (place) => place.id === MINI_GAME_DEFAULT_PLACE_ID,
+  ),
+  0,
+);
+
 export const MINI_GAME_HEART_RECOVERY_MS = 30 * 60 * 1000;
 
 export type MiniGamePlayerStatus = {
@@ -303,7 +311,7 @@ export const MINI_GAME_PLACE_IMAGE_ASSETS = [
 ] as PreloadableImageAsset[];
 
 export const MINI_GAME_PLACE_CRITICAL_IMAGE_ASSETS = [
-  MINI_GAME_PLACE_OPTIONS[0].image,
+  MINI_GAME_PLACE_OPTIONS[MINI_GAME_DEFAULT_PLACE_INDEX].image,
 ] as PreloadableImageAsset[];
 
 export const MINI_GAME_PLACE_DEFERRED_IMAGE_ASSETS = MINI_GAME_PLACE_IMAGE_ASSETS;

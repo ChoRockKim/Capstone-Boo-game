@@ -27,7 +27,7 @@ interface TopAlertProps {
   textSize?: "compact" | "default";
   title: string;
   visible: boolean;
-  visibilityKey?: number;
+  visibilityKey?: number | string;
 }
 
 const HIDDEN_TRANSLATE_Y = -220;

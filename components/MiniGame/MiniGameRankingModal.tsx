@@ -19,16 +19,22 @@ export type MiniGameRankingEntry = {
 };
 
 type MiniGameRankingModalProps = {
+  emptyText?: string;
   entries: MiniGameRankingEntry[];
+  isLoading?: boolean;
   onClose: () => void;
+  summary?: string[];
   title?: string;
 };
 
 const INITIAL_VISIBLE_ENTRY_COUNT = 5;
 
 const MiniGameRankingModal = ({
+  emptyText = "랭킹 데이터가 아직 없어요.",
   entries,
+  isLoading = false,
   onClose,
+  summary = [],
   title = "랭킹",
 }: MiniGameRankingModalProps) => {
   const [isExpanded, setIsExpanded] = useState(false);
@@ -62,6 +68,16 @@ const MiniGameRankingModal = ({
           </Pressable>
         </View>
 
+        {summary.length ? (
+          <View style={styles.summaryBox}>
+            {summary.map((line) => (
+              <Text key={line} style={styles.summaryText}>
+                {line}
+              </Text>
+            ))}
+          </View>
+        ) : null}
+
         <ScrollView
           bounces={false}
           contentContainerStyle={styles.entryListContent}
@@ -69,7 +85,9 @@ const MiniGameRankingModal = ({
           style={styles.entryList}
         >
           {!visibleEntries.length ? (
-            <Text style={styles.emptyText}>랭킹 데이터가 아직 없어요.</Text>
+            <Text style={styles.emptyText}>
+              {isLoading ? "랭킹 데이터를 불러오는 중이에요." : emptyText}
+            </Text>
           ) : null}
           {visibleEntries.map((entry, index) => {
             const rank = index + 1;
@@ -197,6 +215,23 @@ const styles = StyleSheet.create({
   entryList: {
     minHeight: 220,
     flexGrow: 0,
+  },
+  summaryBox: {
+    marginBottom: 12,
+    gap: 6,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    backgroundColor: colors.GOLD_LIGHT_ACTIVE,
+    borderColor: colors.GOLD_NORMAL,
+    borderRadius: 4,
+    borderWidth: 1,
+  },
+  summaryText: {
+    color: colors.BLACK_NORMAL,
+    fontFamily: fonts.BASIC,
+    fontSize: 16,
+    includeFontPadding: false,
+    lineHeight: 20,
   },
   entryListContent: {
     gap: 10,

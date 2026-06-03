@@ -4,10 +4,17 @@ import UserCircleIcon from "@/assets/icons/User-circle.svg";
 import { colors } from "@/constants/colors";
 import { fonts } from "@/constants/fonts";
 import { useGameStore } from "@/stores/useGameStore";
+import { getServerApiErrorMessage, updateCurrentUser } from "@/utils/serverApi";
 import { syncServerUserStats } from "@/utils/syncServerUserStats";
 import { Feather } from "@expo/vector-icons";
-import React, { useEffect } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import React, { useEffect, useState } from "react";
+import {
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
 import ProfileButton from "./ProfileButton";
 
 interface MyProfileType {
@@ -23,6 +30,14 @@ const MyProfile = ({ setIsOptionOpen, setIsProfileOpen }: MyProfileType) => {
   const userName = useGameStore((state) => state.userName);
   const userNickname = useGameStore((state) => state.userNickname);
   const studentId = useGameStore((state) => state.studentId);
+  const [editMode, setEditMode] = useState<"nickname" | "password" | null>(
+    null,
+  );
+  const [nicknameInput, setNicknameInput] = useState(userNickname || booName);
+  const [passwordInput, setPasswordInput] = useState("");
+  const [confirmPasswordInput, setConfirmPasswordInput] = useState("");
+  const [statusMessage, setStatusMessage] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
     if (!accessToken) {
@@ -41,6 +56,76 @@ const MyProfile = ({ setIsOptionOpen, setIsProfileOpen }: MyProfileType) => {
 
   const handleClosePress = () => {
     setIsProfileOpen(false);
+  };
+
+  const openEditMode = (mode: "nickname" | "password") => {
+    setStatusMessage("");
+    setNicknameInput(userNickname || booName);
+    setEditMode(mode);
+  };
+
+  const cancelEditMode = () => {
+    setEditMode(null);
+    setStatusMessage("");
+    setPasswordInput("");
+    setConfirmPasswordInput("");
+    setNicknameInput(userNickname || booName);
+  };
+
+  const handleSavePress = async () => {
+    if (!accessToken || !editMode || isSaving) {
+      return;
+    }
+
+    const trimmedNickname = nicknameInput.trim();
+
+    if (editMode === "nickname" && !trimmedNickname) {
+      setStatusMessage("닉네임을 입력해주세요.");
+      return;
+    }
+
+    if (editMode === "password") {
+      if (
+        passwordInput.length < 8 ||
+        !/[A-Za-z]/.test(passwordInput) ||
+        !/\d/.test(passwordInput)
+      ) {
+        setStatusMessage("비밀번호는 8자 이상, 영문과 숫자를 포함해야 해요.");
+        return;
+      }
+
+      if (passwordInput !== confirmPasswordInput) {
+        setStatusMessage("비밀번호가 일치하지 않아요.");
+        return;
+      }
+    }
+
+    setIsSaving(true);
+    setStatusMessage("");
+
+    try {
+      await updateCurrentUser(
+        editMode === "nickname"
+          ? { nickname: trimmedNickname }
+          : { password: passwordInput },
+        accessToken,
+      );
+      await syncServerUserStats(accessToken);
+      setEditMode(null);
+      setPasswordInput("");
+      setConfirmPasswordInput("");
+      setStatusMessage(
+        editMode === "nickname"
+          ? "닉네임을 변경했어요."
+          : "비밀번호를 변경했어요.",
+      );
+    } catch (error) {
+      setStatusMessage(
+        getServerApiErrorMessage(error, "계정 정보를 변경하지 못했어요."),
+      );
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -110,6 +195,14 @@ const MyProfile = ({ setIsOptionOpen, setIsProfileOpen }: MyProfileType) => {
             />
           )}
           label="닉네임"
+          onPress={() => openEditMode("nickname")}
+          rightAccessory={(pressed) => (
+            <Feather
+              name="chevron-right"
+              size={18}
+              color={pressed ? colors.WHITE_NORMAL : colors.GREEN_NORMAL}
+            />
+          )}
           value={userNickname || booName}
         />
         <ProfileButton
@@ -123,6 +216,7 @@ const MyProfile = ({ setIsOptionOpen, setIsProfileOpen }: MyProfileType) => {
             />
           )}
           label="비밀번호"
+          onPress={() => openEditMode("password")}
           rightAccessory={(pressed) => (
             <Feather
               name="chevron-right"
@@ -133,6 +227,74 @@ const MyProfile = ({ setIsOptionOpen, setIsProfileOpen }: MyProfileType) => {
           value="수정하기"
         />
       </View>
+      {editMode ? (
+        <View style={styles.editBox}>
+          <Text style={styles.editTitle}>
+            {editMode === "nickname" ? "닉네임 수정" : "비밀번호 수정"}
+          </Text>
+          {editMode === "nickname" ? (
+            <TextInput
+              autoCapitalize="none"
+              onChangeText={setNicknameInput}
+              placeholder="닉네임"
+              placeholderTextColor={colors.SILVER_NORMAL}
+              style={styles.input}
+              value={nicknameInput}
+            />
+          ) : (
+            <>
+              <TextInput
+                autoCapitalize="none"
+                onChangeText={setPasswordInput}
+                placeholder="새 비밀번호"
+                placeholderTextColor={colors.SILVER_NORMAL}
+                secureTextEntry
+                style={styles.input}
+                value={passwordInput}
+              />
+              <TextInput
+                autoCapitalize="none"
+                onChangeText={setConfirmPasswordInput}
+                placeholder="새 비밀번호 확인"
+                placeholderTextColor={colors.SILVER_NORMAL}
+                secureTextEntry
+                style={styles.input}
+                value={confirmPasswordInput}
+              />
+            </>
+          )}
+          {statusMessage ? (
+            <Text style={styles.statusText}>{statusMessage}</Text>
+          ) : null}
+          <View style={styles.editActions}>
+            <Pressable
+              onPress={cancelEditMode}
+              style={({ pressed }) => [
+                styles.editActionButton,
+                pressed && styles.editActionButtonPressed,
+              ]}
+            >
+              <Text style={styles.editActionText}>취소</Text>
+            </Pressable>
+            <Pressable
+              disabled={isSaving}
+              onPress={handleSavePress}
+              style={({ pressed }) => [
+                styles.editActionButton,
+                styles.saveButton,
+                pressed && !isSaving && styles.editActionButtonPressed,
+                isSaving && styles.disabledButton,
+              ]}
+            >
+              <Text style={styles.editActionText}>
+                {isSaving ? "저장 중" : "저장"}
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+      ) : statusMessage ? (
+        <Text style={styles.statusText}>{statusMessage}</Text>
+      ) : null}
     </View>
   );
 };
@@ -172,6 +334,71 @@ const styles = StyleSheet.create({
   },
   optionList: {
     gap: 10,
+  },
+  editBox: {
+    marginTop: 14,
+    gap: 8,
+    padding: 12,
+    backgroundColor: colors.GOLD_LIGHT_ACTIVE,
+    borderColor: colors.GOLD_NORMAL,
+    borderRadius: 4,
+    borderWidth: 1,
+  },
+  editTitle: {
+    color: colors.BLACK_NORMAL,
+    fontFamily: fonts.BASIC,
+    fontSize: 18,
+    includeFontPadding: false,
+  },
+  input: {
+    minHeight: 42,
+    paddingHorizontal: 12,
+    color: colors.BLACK_NORMAL,
+    fontFamily: fonts.BASIC,
+    fontSize: 18,
+    backgroundColor: colors.WHITE_NORMAL,
+    borderColor: colors.BLACK_NORMAL,
+    borderRadius: 4,
+    borderWidth: 1,
+  },
+  statusText: {
+    marginTop: 10,
+    color: colors.GREEN_NORMAL,
+    fontFamily: fonts.BASIC,
+    fontSize: 14,
+    includeFontPadding: false,
+    lineHeight: 18,
+  },
+  editActions: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    gap: 8,
+  },
+  editActionButton: {
+    minWidth: 74,
+    minHeight: 38,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 12,
+    backgroundColor: colors.WHITE_NORMAL,
+    borderColor: colors.BLACK_NORMAL,
+    borderRadius: 4,
+    borderWidth: 1,
+  },
+  saveButton: {
+    backgroundColor: colors.GOLD_NORMAL,
+  },
+  editActionButtonPressed: {
+    opacity: 0.7,
+  },
+  disabledButton: {
+    opacity: 0.5,
+  },
+  editActionText: {
+    color: colors.BLACK_NORMAL,
+    fontFamily: fonts.BASIC,
+    fontSize: 16,
+    includeFontPadding: false,
   },
 });
 

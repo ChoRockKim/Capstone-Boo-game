@@ -61,8 +61,9 @@ const shouldAttemptTokenRefresh = (
 booApiClient.interceptors.response.use(
   (response) => response,
   async (error: AxiosError) => {
-    const originalRequest =
-      error.config as RetryableAxiosRequestConfig | undefined;
+    const originalRequest = error.config as
+      | RetryableAxiosRequestConfig
+      | undefined;
 
     if (!shouldAttemptTokenRefresh(error, originalRequest)) {
       throw error;
@@ -145,6 +146,13 @@ export type UserOut = {
   xp_point: number;
 };
 
+export type UserAccountUpdate = {
+  image?: string | null;
+  nickname?: string | null;
+  password?: string | null;
+  student_id?: string | null;
+};
+
 export type SchoolFood = {
   name: string;
   school_food_id: number;
@@ -173,6 +181,7 @@ export type SchoolFoodFeedResult = {
 };
 
 export type QuizQuestionOut = {
+  answer?: string | null;
   options?: Record<string, string> | string[] | null;
   question: string;
   quiz_id: number;
@@ -403,6 +412,36 @@ export const getCurrentUser = async (accessToken?: string) => {
   return response.data;
 };
 
+export const updateCurrentUser = async (
+  params: UserAccountUpdate,
+  accessToken?: string,
+) => {
+  const response = await booApiClient.put<UserOut>("/user/me", params, {
+    headers: accessToken
+      ? {
+          Authorization: `Bearer ${accessToken}`,
+        }
+      : undefined,
+  });
+
+  return response.data;
+};
+
+export const deleteCurrentUser = async (accessToken?: string) => {
+  const response = await booApiClient.delete<Record<string, never>>(
+    "/user/me",
+    {
+      headers: accessToken
+        ? {
+            Authorization: `Bearer ${accessToken}`,
+          }
+        : undefined,
+    },
+  );
+
+  return response.data;
+};
+
 export const getEconomyStatus = async (accessToken?: string) => {
   const response = await booApiClient.get<EconomyStatus>("/economy/status", {
     headers: accessToken
@@ -417,6 +456,22 @@ export const getEconomyStatus = async (accessToken?: string) => {
 
 export const listTodaySchoolFoods = async () => {
   const response = await booApiClient.get<SchoolFood[]>("/school-foods/today");
+
+  return response.data;
+};
+
+export const listSchoolFoods = async (type?: string | null) => {
+  const response = await booApiClient.get<SchoolFood[]>("/school-foods/", {
+    params: type ? { type } : undefined,
+  });
+
+  return response.data;
+};
+
+export const getSchoolFood = async (schoolFoodId: number) => {
+  const response = await booApiClient.get<SchoolFood>(
+    `/school-foods/${schoolFoodId}`,
+  );
 
   return response.data;
 };
@@ -480,6 +535,21 @@ export const getNextQuiz = async (accessToken?: string) => {
         }
       : undefined,
   });
+
+  return response.data;
+};
+
+export const listAvailableQuizzes = async (accessToken?: string) => {
+  const response = await booApiClient.get<QuizQuestionOut[]>(
+    "/quizzes/available",
+    {
+      headers: accessToken
+        ? {
+            Authorization: `Bearer ${accessToken}`,
+          }
+        : undefined,
+    },
+  );
 
   return response.data;
 };
@@ -691,9 +761,8 @@ export const getMyMiniGameRanking = async (accessToken?: string) => {
 };
 
 export const listShopItemTypes = async () => {
-  const response = await booApiClient.get<ShopItemTypeOut[]>(
-    "/shop/item-types",
-  );
+  const response =
+    await booApiClient.get<ShopItemTypeOut[]>("/shop/item-types");
 
   return response.data;
 };
@@ -741,10 +810,7 @@ export const getMyRoom = async (accessToken?: string) => {
   return response.data;
 };
 
-export const equipRoomItem = async (
-  itemId: number,
-  accessToken?: string,
-) => {
+export const equipRoomItem = async (itemId: number, accessToken?: string) => {
   const response = await booApiClient.put<RoomEquippedItemOut>(
     "/rooms/me/equip",
     {
@@ -1002,7 +1068,9 @@ export const getServerApiErrorMessage = (
     return fallbackMessage;
   }
 
-  const detailMessage = extractServerDetailMessage(error.response?.data?.detail);
+  const detailMessage = extractServerDetailMessage(
+    error.response?.data?.detail,
+  );
 
   if (detailMessage) {
     return translateServerErrorMessage(detailMessage, fallbackMessage);

@@ -42,6 +42,42 @@ export interface MealAvailabilityStatus {
   };
 }
 
+export const normalizeMealSectionId = (
+  value?: string | null,
+): MealSectionId | null => {
+  if (!value) {
+    return null;
+  }
+
+  const normalizedValue = value.toLowerCase().replace(/\s/g, "");
+
+  if (
+    normalizedValue.includes("breakfast") ||
+    normalizedValue.includes("조식") ||
+    normalizedValue.includes("아침")
+  ) {
+    return "breakfast";
+  }
+
+  if (
+    normalizedValue.includes("lunch") ||
+    normalizedValue.includes("중식") ||
+    normalizedValue.includes("점심")
+  ) {
+    return "lunch";
+  }
+
+  if (
+    normalizedValue.includes("dinner") ||
+    normalizedValue.includes("석식") ||
+    normalizedValue.includes("저녁")
+  ) {
+    return "dinner";
+  }
+
+  return null;
+};
+
 const getResolvedMealDayMode = (
   date: Date = new Date(),
   mode: MealDayMode = "auto",
