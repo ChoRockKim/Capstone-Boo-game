@@ -22,9 +22,11 @@ import { startBackgroundMusicSession } from "@/utils/backgroundMusic";
 import {
   createMiniGameResult,
   getServerApiErrorMessage,
-  playMiniGameEconomy,
+  rewardMiniGameEconomy,
+  startMiniGameEconomy,
 } from "@/utils/serverApi";
 import { playSoundEffect } from "@/utils/soundEffects";
+import { useQueryClient } from "@tanstack/react-query";
 import * as Haptics from "expo-haptics";
 import { Image as ExpoImage } from "expo-image";
 import { router, useFocusEffect } from "expo-router";
@@ -363,6 +365,7 @@ const BooCatchScoreFeedback = memo(({ feedback }: BooCatchScoreFeedbackProps) =>
 BooCatchScoreFeedback.displayName = "BooCatchScoreFeedback";
 
 const CatchBooPlayScreen = () => {
+  const queryClient = useQueryClient();
   const canPlayMiniGame = useRequirePlayableSession();
   const accessToken = useGameStore((state) => state.accessToken);
   const adjustCoin = useGameStore((state) => state.adjustCoin);
@@ -370,6 +373,16 @@ const CatchBooPlayScreen = () => {
     (state) => state.consumeMiniGameHeart,
   );
   const friendList = useGameStore((state) => state.friendList);
+  const isGuestMode = useGameStore((state) => state.isGuestMode);
+  const applyServerUnlockedAchievements = useGameStore(
+    (state) => state.applyServerUnlockedAchievements,
+  );
+  const recordMiniGameResult = useGameStore(
+    (state) => state.recordMiniGameResult,
+  );
+  const recordServerMiniGamePlay = useGameStore(
+    (state) => state.recordServerMiniGamePlay,
+  );
   const setGameState = useGameStore((state) => state.setGameState);
   const [gameAreaSize, setGameAreaSize] = useState({ height: 0, width: 0 });
   const [activeTargets, setActiveTargets] = useState<BooCatchTarget[]>([]);
@@ -385,6 +398,13 @@ const CatchBooPlayScreen = () => {
   });
   const [coinRewardAmount, setCoinRewardAmount] =
     useState(SUCCESS_COIN_REWARD);
+  const [restartErrorAlert, setRestartErrorAlert] = useState({
+    id: 0,
+    message: "하트가 부족해서 다시 시작할 수 없어요.",
+    title: "미니게임 시작 실패",
+    visible: false,
+  });
+  const [isRestartingRound, setIsRestartingRound] = useState(false);
   const nextTargetIdRef = useRef(1);
   const nextScoreFeedbackIdRef = useRef(1);
   const gameStartedAtMsRef = useRef(0);
@@ -392,11 +412,15 @@ const CatchBooPlayScreen = () => {
   const scoreRef = useRef(0);
   const didRewardCoinRef = useRef(false);
   const didSubmitResultRef = useRef(false);
+  const isStartingMiniGameSessionRef = useRef(false);
+  const isRestartingRoundRef = useRef(false);
+  const pendingSessionFinalizationRef = useRef<Promise<void> | null>(null);
+  const playSessionIdRef = useRef<string | null>(null);
   const hasGameArea = gameAreaSize.width > 0 && gameAreaSize.height > 0;
   const didClearSuccessThreshold = score >= SUCCESS_SCORE_THRESHOLD;
 
   const currentRank = useMemo(() => {
-    if (accessToken) {
+    if (accessToken || isGuestMode) {
       return null;
     }
 
@@ -405,7 +429,7 @@ const CatchBooPlayScreen = () => {
     ).length;
 
     return higherScoreCount + 1;
-  }, [accessToken, friendList, score]);
+  }, [accessToken, friendList, isGuestMode, score]);
 
   useFocusEffect(
     useCallback(() => {
@@ -461,6 +485,74 @@ const CatchBooPlayScreen = () => {
     setScore(0);
   }, [canPlayMiniGame, gamePhase, hasGameArea]);
 
+  const startMiniGameRound = useCallback(async () => {
+    if (isStartingMiniGameSessionRef.current) {
+      return false;
+    }
+
+    isStartingMiniGameSessionRef.current = true;
+    playSessionIdRef.current = null;
+
+    try {
+      if (accessToken) {
+        const startResult = await startMiniGameEconomy(
+          {
+            game_type: "catchBoo",
+            mode: "normal",
+          },
+          accessToken,
+        );
+
+        playSessionIdRef.current = startResult.play_session_id;
+        setGameState({
+          heart: startResult.heart,
+          heartUpdatedAt:
+            startResult.heart_updated_at ??
+            (startResult.spent_heart > 0
+              ? new Date().toISOString()
+              : useGameStore.getState().heartUpdatedAt),
+          maxHeart: startResult.max_heart,
+        });
+        applyServerUnlockedAchievements(startResult.unlocked_achievements);
+        recordServerMiniGamePlay();
+      } else if (!consumeMiniGameHeart()) {
+        setRestartErrorAlert((currentAlert) => ({
+          id: currentAlert.id + 1,
+          message: "하트가 부족해서 다시 시작할 수 없어요.",
+          title: "미니게임 시작 실패",
+          visible: true,
+        }));
+        return false;
+      }
+
+      setCountdownValue(3);
+      setGamePhase("countdown");
+      return true;
+    } catch (error) {
+      const errorMessage = getServerApiErrorMessage(
+        error,
+        "미니게임을 시작할 수 없어요.",
+      );
+
+      console.warn("부 잡기 시작 실패", errorMessage);
+      setRestartErrorAlert((currentAlert) => ({
+        id: currentAlert.id + 1,
+        message: errorMessage,
+        title: "미니게임 시작 실패",
+        visible: true,
+      }));
+      return false;
+    } finally {
+      isStartingMiniGameSessionRef.current = false;
+    }
+  }, [
+    accessToken,
+    applyServerUnlockedAchievements,
+    consumeMiniGameHeart,
+    recordServerMiniGamePlay,
+    setGameState,
+  ]);
+
   useEffect(() => {
     if (
       !canPlayMiniGame ||
@@ -471,19 +563,13 @@ const CatchBooPlayScreen = () => {
       return;
     }
 
-    if (!consumeMiniGameHeart()) {
-      router.replace("/miniGame/catchBoo");
-      return;
-    }
-
-    setCountdownValue(3);
-    setGamePhase("countdown");
+    void startMiniGameRound();
   }, [
     areAssetsReady,
     canPlayMiniGame,
-    consumeMiniGameHeart,
     gamePhase,
     hasGameArea,
+    startMiniGameRound,
   ]);
 
   useEffect(() => {
@@ -546,65 +632,140 @@ const CatchBooPlayScreen = () => {
     }));
   }, []);
 
+  const hideRestartErrorAlert = useCallback(() => {
+    setRestartErrorAlert((currentAlert) => ({
+      ...currentAlert,
+      visible: false,
+    }));
+  }, []);
+
   const submitMiniGameResult = useCallback(
-    (finalScore: number, success: boolean) => {
+    async (finalScore: number, success: boolean) => {
       if (!accessToken || didSubmitResultRef.current) {
         return;
       }
 
       didSubmitResultRef.current = true;
 
-      void createMiniGameResult(
-        {
-          game_type: "catchBoo",
-          location: "lawnPlaza",
-          play_time_seconds: Math.round(GAME_DURATION_MS / 1000),
-          score: finalScore,
-          success,
-        },
-        accessToken,
-      ).catch((error) => {
+      try {
+        const result = await createMiniGameResult(
+          {
+            game_type: "catchBoo",
+            ended_reason: success ? "success" : "failed",
+            location: "lawnPlaza",
+            mode: "normal",
+            play_session_id: playSessionIdRef.current,
+            play_time_seconds: Math.round(GAME_DURATION_MS / 1000),
+            score: finalScore,
+            success,
+          },
+          accessToken,
+        );
+
+        applyServerUnlockedAchievements(result.unlocked_achievements);
+        void queryClient.invalidateQueries({
+          queryKey: ["minigames", "rankings"],
+        });
+      } catch (error) {
         console.warn(
           "부 잡기 결과 저장 실패",
           getServerApiErrorMessage(error, "미니게임 결과 저장 실패"),
         );
-      });
+      }
     },
-    [accessToken],
+    [accessToken, applyServerUnlockedAchievements, queryClient],
   );
 
-  const applyMiniGameSuccessReward = useCallback(async () => {
+  const applyMiniGameSuccessReward = useCallback(async (finalScore: number) => {
+    const optimisticRewardCoin = SUCCESS_COIN_REWARD;
+
+    adjustCoin(optimisticRewardCoin);
+    showCoinRewardAlert(optimisticRewardCoin);
+
     if (!accessToken) {
-      adjustCoin(SUCCESS_COIN_REWARD);
-      showCoinRewardAlert(SUCCESS_COIN_REWARD);
+      return;
+    }
+
+    if (!playSessionIdRef.current) {
+      console.warn("부 잡기 보상 동기화 실패: play_session_id 없음");
+      adjustCoin(-optimisticRewardCoin);
       return;
     }
 
     try {
-      const rewardResult = await playMiniGameEconomy(accessToken);
+      const rewardResult = await rewardMiniGameEconomy(
+        {
+          game_type: "catchBoo",
+          mode: "normal",
+          play_session_id: playSessionIdRef.current,
+          score: finalScore,
+        },
+        accessToken,
+      );
 
       setGameState({
         coin: rewardResult.coin,
-        heart: rewardResult.heart,
-        heartUpdatedAt:
-          rewardResult.spent_heart > 0
-            ? new Date().toISOString()
-            : useGameStore.getState().heartUpdatedAt,
-        maxHeart: rewardResult.max_heart,
+      });
+      applyServerUnlockedAchievements(rewardResult.unlocked_achievements, {
+        coin: rewardResult.coin,
+      });
+      void queryClient.invalidateQueries({
+        queryKey: ["minigames", "rankings"],
       });
 
-      if (rewardResult.awarded_coin > 0) {
-        showCoinRewardAlert(rewardResult.awarded_coin);
-      }
     } catch (error) {
+      adjustCoin(-optimisticRewardCoin);
       console.warn(
         "부 잡기 보상 동기화 실패",
         getServerApiErrorMessage(error, "미니게임 보상 동기화 실패"),
       );
-      adjustCoin(SUCCESS_COIN_REWARD);
-      showCoinRewardAlert(SUCCESS_COIN_REWARD);
     }
-  }, [accessToken, adjustCoin, setGameState, showCoinRewardAlert]);
+  }, [
+    accessToken,
+    adjustCoin,
+    applyServerUnlockedAchievements,
+    queryClient,
+    setGameState,
+    showCoinRewardAlert,
+  ]);
+
+  const finalizeMiniGameSession = useCallback(
+    (finalScore: number, success: boolean, shouldReward: boolean) => {
+      recordMiniGameResult("catchBoo", finalScore);
+
+      const resultPromise = submitMiniGameResult(finalScore, success);
+      const rewardPromise =
+        shouldReward && !didRewardCoinRef.current
+          ? (() => {
+              didRewardCoinRef.current = true;
+
+              return applyMiniGameSuccessReward(finalScore);
+            })()
+          : Promise.resolve();
+      const finalizationPromise = Promise.allSettled([
+        resultPromise,
+        rewardPromise,
+      ]).then(() => undefined);
+
+      pendingSessionFinalizationRef.current = finalizationPromise;
+      void finalizationPromise.finally(() => {
+        if (pendingSessionFinalizationRef.current === finalizationPromise) {
+          pendingSessionFinalizationRef.current = null;
+        }
+      });
+
+      return finalizationPromise;
+    },
+    [applyMiniGameSuccessReward, recordMiniGameResult, submitMiniGameResult],
+  );
+
+  const waitForPendingSessionFinalization = useCallback(async () => {
+    const pendingSessionFinalization = pendingSessionFinalizationRef.current;
+
+    if (pendingSessionFinalization) {
+      await pendingSessionFinalization;
+    }
+  }, []);
 
   const createTargetWave = useCallback((elapsedMs: number) => {
     const { simultaneousCount } = getDifficultyConfig(elapsedMs);
@@ -654,12 +815,7 @@ const CatchBooPlayScreen = () => {
         const didClear = finalScore >= SUCCESS_SCORE_THRESHOLD;
 
         clearInterval(timer);
-        submitMiniGameResult(finalScore, didClear);
-
-        if (didClear && !didRewardCoinRef.current) {
-          didRewardCoinRef.current = true;
-          void applyMiniGameSuccessReward();
-        }
+        finalizeMiniGameSession(finalScore, didClear, didClear);
 
         setActiveTargets([]);
         setScoreFeedbacks([]);
@@ -672,10 +828,9 @@ const CatchBooPlayScreen = () => {
       clearInterval(timer);
     };
   }, [
-    applyMiniGameSuccessReward,
+    finalizeMiniGameSession,
     gamePhase,
     hasGameArea,
-    submitMiniGameResult,
   ]);
 
   useEffect(() => {
@@ -714,8 +869,14 @@ const CatchBooPlayScreen = () => {
 
   const resetRoundState = useCallback(() => {
     nextTargetIdRef.current = 1;
+    nextScoreFeedbackIdRef.current = 1;
     didRewardCoinRef.current = false;
+    didSubmitResultRef.current = false;
     setCoinRewardAlert((currentAlert) => ({
+      ...currentAlert,
+      visible: false,
+    }));
+    setRestartErrorAlert((currentAlert) => ({
       ...currentAlert,
       visible: false,
     }));
@@ -729,15 +890,32 @@ const CatchBooPlayScreen = () => {
     router.replace("/miniGame/catchBoo");
   };
 
-  const handleRestartPress = () => {
-    if (!consumeMiniGameHeart()) {
-      router.replace("/miniGame/catchBoo");
+  const handleRestartPress = async () => {
+    if (
+      isStartingMiniGameSessionRef.current ||
+      isRestartingRoundRef.current
+    ) {
       return;
     }
 
-    resetRoundState();
-    setCountdownValue(3);
-    setGamePhase("countdown");
+    isRestartingRoundRef.current = true;
+    setIsRestartingRound(true);
+
+    try {
+      await waitForPendingSessionFinalization();
+      const didStart = await startMiniGameRound();
+
+      if (didStart) {
+        resetRoundState();
+        return;
+      }
+
+      gamePhaseRef.current = "finished";
+      setGamePhase("finished");
+    } finally {
+      isRestartingRoundRef.current = false;
+      setIsRestartingRound(false);
+    }
   };
 
   const handleGameAreaLayout = (event: LayoutChangeEvent) => {
@@ -928,6 +1106,7 @@ const CatchBooPlayScreen = () => {
                 width={128}
               />
               <MainButton
+                disabled={isRestartingRound}
                 height={60}
                 label="> 다시시작"
                 onPress={handleRestartPress}
@@ -938,6 +1117,13 @@ const CatchBooPlayScreen = () => {
           </View>
         </View>
       ) : null}
+      <TopAlert
+        message={restartErrorAlert.message}
+        onClose={hideRestartErrorAlert}
+        title={restartErrorAlert.title}
+        visibilityKey={restartErrorAlert.id}
+        visible={restartErrorAlert.visible}
+      />
     </View>
   );
 };

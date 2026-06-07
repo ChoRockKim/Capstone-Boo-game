@@ -49,7 +49,6 @@ const Register = ({ isRegisterOpen, setIsRegisterOpen }: RegisterProps) => {
           returnKeyType="done"
           onChangeText={setEmail}
           value={email}
-          onSubmitEditing={() => console.log(email)}
         />
       </View>
     </KeyboardAvoidingView>

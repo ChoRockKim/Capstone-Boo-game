@@ -6,9 +6,10 @@
  */
 /* eslint-disable react-hooks/set-state-in-effect -- Character image state is synchronized from the incoming animation state prop. */
 import {
-  CHARACTER_IMAGES,
+  CharacterCostumeKey,
   CharacterGrade,
   CharacterState,
+  getCharacterImage,
   getNextCharacterState,
 } from "@/constants/character";
 import { Image } from "expo-image";
@@ -17,6 +18,7 @@ import { StyleSheet, View } from "react-native";
 
 interface CharacterProps {
   animationIntervalMs?: number;
+  costumeKey?: CharacterCostumeKey;
   grade: CharacterGrade;
   onImageReady?: () => void;
   state: CharacterState;
@@ -24,12 +26,13 @@ interface CharacterProps {
 
 const Character = ({
   animationIntervalMs = 800,
+  costumeKey = "default",
   grade,
   onImageReady,
   state,
 }: CharacterProps) => {
   const [currentState, setCurrentState] = useState<CharacterState>(state);
-  const characterImage = CHARACTER_IMAGES.grades[grade][currentState];
+  const characterImage = getCharacterImage(grade, currentState, costumeKey);
 
   useEffect(() => {
     setCurrentState(state);

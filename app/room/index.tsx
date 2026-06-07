@@ -9,6 +9,7 @@ import CheckBoxIcon from "@/assets/icons/check-box.svg";
 import CoinIcon from "@/assets/icons/coin.svg";
 import MarketIcon from "@/assets/icons/market.svg";
 import CoinBox from "@/components/CoinBox/CoinBox";
+import MainButton from "@/components/MainButton/MainButton";
 import ProgressBar from "@/components/ProgressBar/ProgressBar";
 import GuestbookListModal from "@/components/Room/GuestbookListModal";
 import {
@@ -21,6 +22,12 @@ import {
 } from "@/components/Room/RoomData";
 import RoomScene from "@/components/Room/RoomScene";
 import SquareButton from "@/components/SquareButton/SquareButton";
+import TopAlert from "@/components/TopAlert/TopAlert";
+import {
+  CHARACTER_COSTUMES,
+  getCharacterImage,
+  type CharacterCostumeKey,
+} from "@/constants/character";
 import { colors } from "@/constants/colors";
 import { fonts } from "@/constants/fonts";
 import { useGameStore } from "@/stores/useGameStore";
@@ -28,6 +35,7 @@ import { useRequirePlayableSession } from "@/useHook/useRequirePlayableSession";
 import { useSyncServerUserStatsOnFocus } from "@/useHook/useSyncServerUserStatsOnFocus";
 import { startBackgroundMusicSession } from "@/utils/backgroundMusic";
 import {
+  deleteRoomGuestbook,
   equipRoomItem,
   getMyRoom,
   getServerApiErrorMessage,
@@ -36,18 +44,22 @@ import {
   listShopItems,
   purchaseShopItem,
   ShopItemOut,
+  updateRoomGuestbook,
 } from "@/utils/serverApi";
+import { RoomGuestbookListEntry } from "@/components/Room/RoomGuestbookDummyData";
 import { mapGuestbookOutToListEntry } from "@/utils/serverGuestbookAdapter";
 import {
   getServerShopItemForLocalRoomOption,
   mapServerRoomAndShopItemsToLocalRoomState,
+  normalizeServerRoomItemType,
 } from "@/utils/serverRoomAdapter";
 import { playSoundEffect } from "@/utils/soundEffects";
 import { getXpProgressInfo } from "@/utils/xpProgress";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Image } from "expo-image";
 import { router, useFocusEffect } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Pressable,
   StyleSheet,
@@ -73,6 +85,12 @@ type RoomCustomizeCategory = {
   id: RoomCustomizeCategoryId;
   label: string;
   options: RoomCustomizeOption[];
+};
+type RoomTopAlertState = {
+  id: number;
+  message: string;
+  title: string;
+  visible: boolean;
 };
 type RoomItemEntry = [RoomItemId, (typeof ROOM_ITEM_ASSETS)[RoomItemId]];
 type RoomWallpaperEntry = [
@@ -147,7 +165,9 @@ const getServerShopItemForCustomizeOption = ({
   serverShopItems: ShopItemOut[] | undefined;
   type: RoomCustomizeCategoryId;
 }) => {
-  const serverItemType = type === "wallpaper" ? "wallpaper" : type;
+  const serverItemType = normalizeServerRoomItemType(
+    type === "wallpaper" ? "wallpaper" : type,
+  );
 
   if (
     serverItemType !== "wallpaper" &&
@@ -166,6 +186,38 @@ const getServerShopItemForCustomizeOption = ({
   });
 };
 
+const getRoomShopItemLogPayload = (item: ShopItemOut | null | undefined) =>
+  item
+    ? {
+        equipped: item.equipped,
+        item_id: item.item_id,
+        item_key: item.item_key,
+        item_type: item.item_type,
+        name: item.name,
+        owned: item.owned,
+        price: item.price,
+      }
+    : null;
+
+const getRoomShopItemsLogSummary = (
+  serverShopItems: ShopItemOut[] | undefined,
+  type: RoomCustomizeCategoryId,
+) => {
+  const serverItemType = normalizeServerRoomItemType(
+    type === "wallpaper" ? "wallpaper" : type,
+  );
+
+  return {
+    count: serverShopItems?.length ?? 0,
+    matchingTypeItems:
+      serverShopItems
+        ?.filter(
+          (item) => normalizeServerRoomItemType(item.item_type) === serverItemType,
+        )
+        .map(getRoomShopItemLogPayload) ?? [],
+  };
+};
+
 export default function RoomIndex() {
   const insets = useSafeAreaInsets();
   useRequirePlayableSession();
@@ -173,9 +225,16 @@ export default function RoomIndex() {
   const queryClient = useQueryClient();
   const { height, width } = useWindowDimensions();
   const [isCustomizeMode, setIsCustomizeMode] = useState(false);
+  const [isClosetOpen, setIsClosetOpen] = useState(false);
   const [showOwnedCustomizeOptionsOnly, setShowOwnedCustomizeOptionsOnly] =
     useState(false);
   const [isGuestbookListOpen, setIsGuestbookListOpen] = useState(false);
+  const [topAlert, setTopAlert] = useState<RoomTopAlertState>({
+    id: 0,
+    message: "",
+    title: "",
+    visible: false,
+  });
   const [customizeCategoryIndex, setCustomizeCategoryIndex] = useState(0);
   const [customizeOptionIndexes, setCustomizeOptionIndexes] = useState<
     Record<RoomCustomizeCategoryId, number>
@@ -185,11 +244,17 @@ export default function RoomIndex() {
     closet: 0,
     table: 0,
   });
+  const lastRoomEnterAccessTokenRef = useRef<string | null>(null);
   const [purchaseTarget, setPurchaseTarget] =
     useState<RoomCustomizeOption | null>(null);
   const [purchaseErrorMessage, setPurchaseErrorMessage] = useState("");
+  const [selectedClosetCostumeKey, setSelectedClosetCostumeKey] =
+    useState<CharacterCostumeKey>("default");
   const accessToken = useGameStore((state) => state.accessToken);
   const booName = useGameStore((state) => state.booName);
+  const characterCostumeKey = useGameStore(
+    (state) => state.characterCostumeKey,
+  );
   const characterState = useGameStore((state) => state.characterState);
   const coin = useGameStore((state) => state.coin);
   const equippedRoomItems = useGameStore((state) => state.equippedRoomItems);
@@ -199,6 +264,9 @@ export default function RoomIndex() {
   const ownedRoomItems = useGameStore((state) => state.ownedRoomItems);
   const ownedRoomWallpapers = useGameStore(
     (state) => state.ownedRoomWallpapers,
+  );
+  const ownedAchievementSkins = useGameStore(
+    (state) => state.ownedAchievementSkins,
   );
   const purchaseRoomItem = useGameStore((state) => state.purchaseRoomItem);
   const purchaseRoomWallpaper = useGameStore(
@@ -214,6 +282,9 @@ export default function RoomIndex() {
   const setEquippedRoomWallpaper = useGameStore(
     (state) => state.setEquippedRoomWallpaper,
   );
+  const setCharacterCostumeKey = useGameStore(
+    (state) => state.setCharacterCostumeKey,
+  );
   const setGameState = useGameStore((state) => state.setGameState);
   const totalXp = useGameStore((state) => state.totalXp);
   const userId = useGameStore((state) => state.userId);
@@ -224,7 +295,7 @@ export default function RoomIndex() {
     staleTime: 1000 * 30,
     retry: 1,
   });
-  const { data: serverGuestbookEntries } = useQuery({
+  const { data: serverGuestbookPage } = useQuery({
     queryKey: ["rooms", userId, "guestbook"],
     queryFn: () => listRoomGuestbook(userId ?? 0, accessToken ?? undefined),
     enabled: !!accessToken && userId !== null,
@@ -233,7 +304,16 @@ export default function RoomIndex() {
   });
   const { data: serverShopItems, refetch: refetchServerShopItems } = useQuery({
     queryKey: ["shop", "items", accessToken],
-    queryFn: () => listShopItems(accessToken ?? undefined),
+    queryFn: async () => {
+      const items = await listShopItems(accessToken ?? undefined);
+
+      console.warn("[RoomShop] shop items loaded", {
+        count: items.length,
+        items: items.slice(0, 8).map(getRoomShopItemLogPayload),
+      });
+
+      return items;
+    },
     enabled: !!accessToken,
     staleTime: 1000 * 30,
     retry: 1,
@@ -251,7 +331,7 @@ export default function RoomIndex() {
 
     const serverLabelByType = new Map(
       serverShopItemTypes.map((itemType) => [
-        itemType.item_type,
+        normalizeServerRoomItemType(itemType.item_type) ?? itemType.item_type,
         itemType.label,
       ]),
     );
@@ -281,8 +361,60 @@ export default function RoomIndex() {
     );
   }, [accessToken, serverRoom, serverShopItems, setGameState]);
   const guestbookEntries = useMemo(
-    () => serverGuestbookEntries?.map(mapGuestbookOutToListEntry),
-    [serverGuestbookEntries],
+    () => serverGuestbookPage?.items.map(mapGuestbookOutToListEntry),
+    [serverGuestbookPage],
+  );
+  const showTopAlert = useCallback((title: string, message: string) => {
+    setTopAlert((currentAlert) => ({
+      id: currentAlert.id + 1,
+      message,
+      title,
+      visible: true,
+    }));
+  }, []);
+  const hideTopAlert = useCallback(() => {
+    setTopAlert((currentAlert) => ({
+      ...currentAlert,
+      visible: false,
+    }));
+  }, []);
+  const handleGuestbookDelete = useCallback(
+    async (entry: RoomGuestbookListEntry) => {
+      if (!accessToken || entry.serverEntryId === undefined) {
+        return;
+      }
+
+      try {
+        await deleteRoomGuestbook(entry.serverEntryId, accessToken);
+        await queryClient.invalidateQueries({
+          queryKey: ["rooms", userId, "guestbook"],
+        });
+      } catch (error) {
+        throw new Error(
+          getServerApiErrorMessage(error, "방명록을 삭제하지 못했어요."),
+        );
+      }
+    },
+    [accessToken, queryClient, userId],
+  );
+  const handleGuestbookUpdate = useCallback(
+    async (entry: RoomGuestbookListEntry, message: string) => {
+      if (!accessToken || entry.serverEntryId === undefined) {
+        return;
+      }
+
+      try {
+        await updateRoomGuestbook(entry.serverEntryId, message, accessToken);
+        await queryClient.invalidateQueries({
+          queryKey: ["rooms", userId, "guestbook"],
+        });
+      } catch (error) {
+        throw new Error(
+          getServerApiErrorMessage(error, "방명록을 수정하지 못했어요."),
+        );
+      }
+    },
+    [accessToken, queryClient, userId],
   );
   const getVisibleCustomizeOptions = useCallback(
     (
@@ -406,6 +538,53 @@ export default function RoomIndex() {
       : null;
   const purchaseAsset = purchaseWallpaper ?? purchaseRoomItemAsset;
   const xpProgress = useMemo(() => getXpProgressInfo(totalXp), [totalXp]);
+  const canApplyAchievementCostume = xpProgress.grade >= 2;
+  const previewCharacterCostumeKey = isClosetOpen
+    ? canApplyAchievementCostume
+      ? selectedClosetCostumeKey
+      : "default"
+    : canApplyAchievementCostume
+      ? characterCostumeKey
+      : "default";
+  const closetCostumeOptions = useMemo(
+    () =>
+      CHARACTER_COSTUMES.map((costume) => {
+        const isDefaultCostume = costume.key === "default";
+        const isOwned =
+          isDefaultCostume ||
+          (!!costume.skinKey && ownedAchievementSkins.includes(costume.skinKey));
+        const isLockedByGrade = !isDefaultCostume && !canApplyAchievementCostume;
+        const previewGrade =
+          isLockedByGrade && isOwned ? 2 : xpProgress.grade;
+
+        return {
+          ...costume,
+          image: getCharacterImage(previewGrade, characterState, costume.key),
+          isEquipped: characterCostumeKey === costume.key,
+          isOwned,
+          isSelectable: isOwned && !isLockedByGrade,
+          isSelected: selectedClosetCostumeKey === costume.key,
+          statusText: isLockedByGrade ? "2학년부터" : "",
+        };
+      }),
+    [
+      canApplyAchievementCostume,
+      characterState,
+      characterCostumeKey,
+      ownedAchievementSkins,
+      selectedClosetCostumeKey,
+      xpProgress.grade,
+    ],
+  );
+  const closetCostumeRows = useMemo(
+    () =>
+      Array.from(
+        { length: Math.ceil(closetCostumeOptions.length / 2) },
+        (_, rowIndex) =>
+          closetCostumeOptions.slice(rowIndex * 2, rowIndex * 2 + 2),
+      ),
+    [closetCostumeOptions],
+  );
   const availableRoomHeight = Math.max(
     260,
     height - insets.top - insets.bottom - ROOM_VERTICAL_RESERVED_SPACE,
@@ -416,6 +595,7 @@ export default function RoomIndex() {
     ROOM_MAX_WIDTH,
   );
   const roomHeight = roomWidth / ROOM_CANVAS_ASPECT_RATIO;
+  const closetConfirmButtonWidth = Math.min(width - 112, 374);
   const progressBarBottomOffset = Math.max(
     insets.bottom + 24,
     PROGRESS_BOTTOM_OFFSET,
@@ -463,6 +643,21 @@ export default function RoomIndex() {
         return;
       }
 
+      if (accessToken && !selectedServerShopItem) {
+        const message = "서버 상점 정보를 불러온 뒤 다시 시도해주세요.";
+        console.warn("[RoomShop] equip wallpaper item mapping failed", {
+          option: selectedCustomizeOption,
+          selectedCategory: selectedCustomizeCategory.id,
+          serverShopItems: getRoomShopItemsLogSummary(
+            serverShopItems,
+            selectedCustomizeCategory.id,
+          ),
+        });
+        setPurchaseErrorMessage(message);
+        showTopAlert("상점 정보 오류", message);
+        return;
+      }
+
       if (accessToken && selectedServerShopItem) {
         try {
           await equipRoomItem(selectedServerShopItem.item_id, accessToken);
@@ -473,6 +668,12 @@ export default function RoomIndex() {
             queryKey: ["shop", "items"],
           });
         } catch (error) {
+          console.warn("[RoomShop] equip wallpaper request failed", {
+            error,
+            option: selectedCustomizeOption,
+            selectedCategory: selectedCustomizeCategory.id,
+            serverItem: getRoomShopItemLogPayload(selectedServerShopItem),
+          });
           setPurchaseErrorMessage(
             getServerApiErrorMessage(error, "장착에 실패했어요."),
           );
@@ -494,6 +695,21 @@ export default function RoomIndex() {
       return;
     }
 
+    if (accessToken && !selectedServerShopItem) {
+      const message = "서버 상점 정보를 불러온 뒤 다시 시도해주세요.";
+      console.warn("[RoomShop] equip room item mapping failed", {
+        option: selectedCustomizeOption,
+        selectedCategory: selectedCustomizeCategory.id,
+        serverShopItems: getRoomShopItemsLogSummary(
+          serverShopItems,
+          selectedCustomizeCategory.id,
+        ),
+      });
+      setPurchaseErrorMessage(message);
+      showTopAlert("상점 정보 오류", message);
+      return;
+    }
+
     if (accessToken && selectedServerShopItem) {
       try {
         await equipRoomItem(selectedServerShopItem.item_id, accessToken);
@@ -504,6 +720,12 @@ export default function RoomIndex() {
           queryKey: ["shop", "items"],
         });
       } catch (error) {
+        console.warn("[RoomShop] equip room item request failed", {
+          error,
+          option: selectedCustomizeOption,
+          selectedCategory: selectedCustomizeCategory.id,
+          serverItem: getRoomShopItemLogPayload(selectedServerShopItem),
+        });
         setPurchaseErrorMessage(
           getServerApiErrorMessage(error, "장착에 실패했어요."),
         );
@@ -529,6 +751,57 @@ export default function RoomIndex() {
     setIsGuestbookListOpen(true);
   };
 
+  const handleClosetPress = () => {
+    if (isCustomizeMode) {
+      return;
+    }
+
+    playSoundEffect("basicClick");
+    setSelectedClosetCostumeKey(
+      canApplyAchievementCostume ? characterCostumeKey : "default",
+    );
+    setIsClosetOpen(true);
+  };
+
+  const closeClosetModal = () => {
+    playSoundEffect("basicClick");
+    setIsClosetOpen(false);
+    setSelectedClosetCostumeKey(
+      canApplyAchievementCostume ? characterCostumeKey : "default",
+    );
+  };
+
+  const selectClosetCostume = (
+    costumeKey: CharacterCostumeKey,
+    isOwned: boolean,
+  ) => {
+    if (!isOwned) {
+      return;
+    }
+
+    playSoundEffect("basicClick");
+    setSelectedClosetCostumeKey(costumeKey);
+  };
+
+  const confirmClosetCostume = () => {
+    const selectedCostume = closetCostumeOptions.find(
+      (costume) => costume.key === selectedClosetCostumeKey,
+    );
+
+    if (!selectedCostume?.isSelectable) {
+      showTopAlert(
+        "코스튬 변경 불가",
+        selectedCostume?.statusText || "선택할 수 없는 코스튬이에요.",
+      );
+      return;
+    }
+
+    playSoundEffect("basicClick");
+    setCharacterCostumeKey(selectedClosetCostumeKey);
+    setIsClosetOpen(false);
+    showTopAlert("코스튬 변경 완료", `${selectedCostume.label} 코스튬을 적용했어요.`);
+  };
+
   const confirmPurchase = async () => {
     if (!purchaseTarget) {
       return;
@@ -536,11 +809,50 @@ export default function RoomIndex() {
 
     playSoundEffect("basicClick");
 
+    const purchaseCategory = purchaseWallpaper
+      ? "wallpaper"
+      : selectedCustomizeCategory.id;
+    let latestServerShopItems = serverShopItems;
+
+    if (
+      accessToken &&
+      (!latestServerShopItems || latestServerShopItems.length === 0)
+    ) {
+      console.warn("[RoomShop] shop items empty before purchase, refetching", {
+        target: purchaseTarget,
+        selectedCategory: selectedCustomizeCategory.id,
+      });
+
+      const refetchResult = await refetchServerShopItems();
+      console.warn("[RoomShop] shop items refetch result", {
+        count: refetchResult.data?.length ?? 0,
+        error: refetchResult.error,
+        items: refetchResult.data?.slice(0, 8).map(getRoomShopItemLogPayload),
+        status: refetchResult.status,
+      });
+      latestServerShopItems = refetchResult.data;
+    }
+
     const serverPurchaseItem = getServerShopItemForCustomizeOption({
       option: purchaseTarget,
-      serverShopItems,
-      type: purchaseWallpaper ? "wallpaper" : selectedCustomizeCategory.id,
+      serverShopItems: latestServerShopItems,
+      type: purchaseCategory,
     });
+
+    if (accessToken && !serverPurchaseItem) {
+      const message = "서버 상점 정보를 불러온 뒤 다시 시도해주세요.";
+      console.warn("[RoomShop] purchase item mapping failed", {
+        option: purchaseTarget,
+        selectedCategory: selectedCustomizeCategory.id,
+        serverShopItems: getRoomShopItemsLogSummary(
+          latestServerShopItems,
+          purchaseCategory,
+        ),
+      });
+      setPurchaseErrorMessage(message);
+      showTopAlert("상점 정보 오류", message);
+      return;
+    }
 
     if (accessToken && serverPurchaseItem) {
       try {
@@ -557,7 +869,11 @@ export default function RoomIndex() {
             queryKey: ["rooms", "me"],
           });
         } catch (error) {
-          console.warn("서버 구매 후 장착 실패", error);
+          console.warn("[RoomShop] equip after purchase request failed", {
+            error,
+            purchaseResultItem: getRoomShopItemLogPayload(purchaseResult.item),
+            target: purchaseTarget,
+          });
         }
 
         const currentGameState = useGameStore.getState();
@@ -616,6 +932,11 @@ export default function RoomIndex() {
         setPurchaseErrorMessage("");
         return;
       } catch (error) {
+        console.warn("[RoomShop] purchase request failed", {
+          error,
+          serverItem: getRoomShopItemLogPayload(serverPurchaseItem),
+          target: purchaseTarget,
+        });
         setPurchaseErrorMessage(
           getServerApiErrorMessage(error, "구매에 실패했어요."),
         );
@@ -661,6 +982,7 @@ export default function RoomIndex() {
       const nextValue = !currentValue;
 
       if (nextValue) {
+        setIsClosetOpen(false);
         setCustomizeOptionIndexes(
           getCustomizeOptionIndexesFromEquippedForMode(
             showOwnedCustomizeOptionsOnly,
@@ -677,14 +999,22 @@ export default function RoomIndex() {
 
   useFocusEffect(
     useCallback(() => {
+      lastRoomEnterAccessTokenRef.current = accessToken;
       recordRoomEnter();
       return startBackgroundMusicSession("myRoom");
-    }, [recordRoomEnter]),
+    }, [accessToken, recordRoomEnter]),
   );
 
   return (
     <View style={styles.root}>
       <StatusBar hidden />
+      <TopAlert
+        message={topAlert.message}
+        onClose={hideTopAlert}
+        title={topAlert.title}
+        visibilityKey={topAlert.id}
+        visible={topAlert.visible}
+      />
       <SafeAreaView style={styles.container}>
         <View style={styles.topBar}>
           <View style={styles.leftControls}>
@@ -723,6 +1053,7 @@ export default function RoomIndex() {
 
         <View style={styles.roomStage}>
           <RoomScene
+            characterCostumeKey={previewCharacterCostumeKey}
             characterState={characterState}
             equippedRoomItems={previewEquippedRoomItems}
             grade={xpProgress.grade}
@@ -731,6 +1062,7 @@ export default function RoomIndex() {
               isCustomizeMode
                 ? undefined
                 : {
+                    closet: handleClosetPress,
                     table: handleTablePress,
                   }
             }
@@ -809,8 +1141,86 @@ export default function RoomIndex() {
         {isGuestbookListOpen ? (
           <GuestbookListModal
             entries={guestbookEntries}
+            onActionError={showTopAlert}
+            onDeleteEntry={handleGuestbookDelete}
+            onUpdateEntry={handleGuestbookUpdate}
             onClose={() => setIsGuestbookListOpen(false)}
           />
+        ) : null}
+        {isClosetOpen ? (
+          <View style={styles.closetOverlay}>
+            <View style={styles.closetCard}>
+              <View style={styles.closetHeader}>
+                <Text style={styles.closetTitleText}>옷장</Text>
+                <Pressable
+                  onPress={closeClosetModal}
+                  style={({ pressed }) => [
+                    styles.closetCloseButton,
+                    pressed && styles.closetCloseButtonPressed,
+                  ]}
+                >
+                  <Text style={styles.closetCloseText}>×</Text>
+                </Pressable>
+              </View>
+              <View style={styles.closetGrid}>
+                {closetCostumeRows.map((row, rowIndex) => (
+                  <View key={rowIndex} style={styles.closetGridRow}>
+                    {row.map((costume) => (
+                      <Pressable
+                        disabled={!costume.isSelectable}
+                        key={costume.key}
+                        onPress={() =>
+                          selectClosetCostume(costume.key, costume.isSelectable)
+                        }
+                        style={({ pressed }) => [
+                          styles.closetCostumeCard,
+                          costume.isSelected &&
+                            styles.closetCostumeCardSelected,
+                          !costume.isSelectable &&
+                            styles.closetCostumeCardLocked,
+                          pressed &&
+                            costume.isSelectable &&
+                            styles.closetCostumeCardPressed,
+                        ]}
+                      >
+                        {costume.isOwned ? (
+                          <Image
+                            cachePolicy="memory-disk"
+                            contentFit="contain"
+                            source={costume.image}
+                            style={styles.closetCostumeImage}
+                          />
+                        ) : (
+                          <Text style={styles.closetQuestionText}>?</Text>
+                        )}
+                        <Text
+                          style={[
+                            styles.closetCostumeLabelText,
+                            !costume.isOwned &&
+                              styles.closetCostumeLabelTextLocked,
+                          ]}
+                        >
+                          {costume.label}
+                        </Text>
+                        {costume.statusText ? (
+                          <Text style={styles.closetCostumeStatusText}>
+                            {costume.statusText}
+                          </Text>
+                        ) : null}
+                      </Pressable>
+                    ))}
+                  </View>
+                ))}
+              </View>
+              <MainButton
+                height={60}
+                label="확인"
+                onPress={confirmClosetCostume}
+                size="M"
+                width={closetConfirmButtonWidth}
+              />
+            </View>
+          </View>
         ) : null}
         {purchaseTarget && purchaseAsset ? (
           <View style={styles.purchaseOverlay}>
@@ -1066,6 +1476,112 @@ const styles = StyleSheet.create({
     fontSize: 24,
     includeFontPadding: false,
     lineHeight: 32,
+  },
+  closetOverlay: {
+    ...StyleSheet.absoluteFill,
+    zIndex: 18,
+    alignItems: "center",
+    justifyContent: "flex-end",
+    backgroundColor: "rgba(0, 0, 0, 0.28)",
+    paddingHorizontal: 28,
+    paddingBottom: 18,
+  },
+  closetCard: {
+    width: "100%",
+    maxWidth: 430,
+    backgroundColor: colors.WHITE_NORMAL,
+    borderColor: colors.BLACK_NORMAL,
+    borderRadius: 0,
+    borderWidth: 1,
+    paddingHorizontal: 28,
+    paddingBottom: 28,
+    paddingTop: 26,
+  },
+  closetHeader: {
+    minHeight: 48,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 10,
+  },
+  closetTitleText: {
+    color: colors.BLACK_NORMAL,
+    fontFamily: fonts.BASIC,
+    fontSize: 30,
+    includeFontPadding: false,
+    lineHeight: 38,
+  },
+  closetCloseButton: {
+    width: 44,
+    height: 44,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  closetCloseButtonPressed: {
+    transform: [{ translateY: 1 }],
+  },
+  closetCloseText: {
+    color: colors.BLACK_NORMAL,
+    fontFamily: fonts.BASIC,
+    fontSize: 44,
+    includeFontPadding: false,
+    lineHeight: 44,
+  },
+  closetGrid: {
+    gap: 8,
+    marginBottom: 14,
+  },
+  closetGridRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  closetCostumeCard: {
+    flex: 1,
+    aspectRatio: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: colors.WHITE_NORMAL,
+    borderColor: "transparent",
+    borderStyle: "dashed",
+    borderWidth: 1,
+  },
+  closetCostumeCardSelected: {
+    borderColor: colors.GOLD_NORMAL,
+  },
+  closetCostumeCardLocked: {
+    backgroundColor: colors.SILVER_LIGHT_HOVER,
+  },
+  closetCostumeCardPressed: {
+    backgroundColor: colors.GOLD_LIGHT_ACTIVE,
+  },
+  closetCostumeImage: {
+    width: "56%",
+    height: "46%",
+  },
+  closetQuestionText: {
+    color: colors.BLACK_NORMAL,
+    fontFamily: fonts.BASIC,
+    fontSize: 46,
+    includeFontPadding: false,
+    lineHeight: 54,
+  },
+  closetCostumeLabelText: {
+    color: colors.BLACK_NORMAL,
+    fontFamily: fonts.BASIC,
+    fontSize: 24,
+    includeFontPadding: false,
+    lineHeight: 30,
+  },
+  closetCostumeLabelTextLocked: {
+    color: colors.BLACK_NORMAL,
+  },
+  closetCostumeStatusText: {
+    color: colors.SILVER_NORMAL_ACTIVE,
+    fontFamily: fonts.BASIC,
+    fontSize: 12,
+    includeFontPadding: false,
+    lineHeight: 14,
   },
   purchaseOverlay: {
     ...StyleSheet.absoluteFill,

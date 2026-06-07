@@ -17,12 +17,17 @@ import {
   ROOM_SENIOR_MINI_BOO_ON_BED_LAYOUT,
   type RoomMiniBooWalkPoint,
 } from "@/components/Room/RoomData";
-import { CharacterGrade, CharacterState } from "@/constants/character";
+import {
+  CharacterCostumeKey,
+  CharacterGrade,
+  CharacterState,
+} from "@/constants/character";
 import * as Haptics from "expo-haptics";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Animated, Easing, PanResponder, StyleSheet } from "react-native";
 
 interface RoomMiniBooProps {
+  costumeKey?: CharacterCostumeKey;
   grade: CharacterGrade;
   grabbable?: boolean;
   roomHeight: number;
@@ -125,6 +130,7 @@ const isPointInPolygon = (
 };
 
 const RoomMiniBoo = ({
+  costumeKey = "default",
   grade,
   grabbable = false,
   roomHeight,
@@ -692,6 +698,7 @@ const RoomMiniBoo = ({
       >
         <Character
           animationIntervalMs={isSeniorGrade ? 1200 : isWalking ? 480 : 900}
+          costumeKey={costumeKey}
           grade={grade}
           state={state}
         />

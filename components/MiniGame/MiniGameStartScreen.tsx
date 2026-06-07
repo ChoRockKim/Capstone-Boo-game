@@ -35,8 +35,8 @@ import { useRequirePlayableSession } from "@/useHook/useRequirePlayableSession";
 import { useSyncServerUserStatsOnFocus } from "@/useHook/useSyncServerUserStatsOnFocus";
 import { startBackgroundMusicSession } from "@/utils/backgroundMusic";
 import {
-  getMyMiniGameRanking,
-  listMyMiniGameResults,
+  listMiniGameRankings,
+  listFriendMiniGameRankings,
 } from "@/utils/serverApi";
 import { getXpProgressInfo } from "@/utils/xpProgress";
 import { useQuery } from "@tanstack/react-query";
@@ -69,6 +69,7 @@ const MiniGameStartScreen = ({ miniGameId }: MiniGameStartScreenProps) => {
   const friendList = useGameStore((state) => state.friendList);
   const heart = useGameStore((state) => state.heart);
   const heartUpdatedAt = useGameStore((state) => state.heartUpdatedAt);
+  const isGuestMode = useGameStore((state) => state.isGuestMode);
   const maxHeart = useGameStore((state) => state.maxHeart);
   const totalXp = useGameStore((state) => state.totalXp);
   const xpProgress = useMemo(() => getXpProgressInfo(totalXp), [totalXp]);
@@ -87,20 +88,51 @@ const MiniGameStartScreen = ({ miniGameId }: MiniGameStartScreenProps) => {
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [fallbackRecoveryStartedAtMs] = useState(() => Date.now());
   const accessToken = useGameStore((state) => state.accessToken);
-  const { data: myMiniGameRanking, isFetching: isRankingFetching } = useQuery({
-    queryKey: ["minigames", "ranking", "me", accessToken],
-    queryFn: () => getMyMiniGameRanking(accessToken ?? undefined),
+  const userId = useGameStore((state) => state.userId);
+  const { data: miniGameRankingList, isFetching: isRankingFetching } = useQuery({
+    queryKey: [
+      "minigames",
+      "rankings",
+      accessToken,
+      miniGame.id,
+      isInfiniteMode ? "infinite" : "normal",
+    ],
+    queryFn: () =>
+      listMiniGameRankings(
+        {
+          game_type: miniGame.id,
+          limit: 100,
+          mode: isInfiniteMode ? "infinite" : "normal",
+        },
+        accessToken ?? undefined,
+      ),
     enabled: !!accessToken,
     staleTime: 1000 * 15,
     retry: 1,
   });
-  const { data: myMiniGameResults, isFetching: isResultsFetching } = useQuery({
-    queryKey: ["minigames", "results", "me", accessToken],
-    queryFn: () => listMyMiniGameResults(accessToken ?? undefined),
-    enabled: !!accessToken,
-    staleTime: 1000 * 15,
-    retry: 1,
-  });
+  const { data: friendRankingList, isFetching: isFriendRankingFetching } =
+    useQuery({
+      queryKey: [
+        "minigames",
+        "rankings",
+        "friends",
+        accessToken,
+        miniGame.id,
+        isInfiniteMode ? "infinite" : "normal",
+      ],
+      queryFn: () =>
+        listFriendMiniGameRankings(
+          {
+            game_type: miniGame.id,
+            limit: 30,
+            mode: isInfiniteMode ? "infinite" : "normal",
+          },
+          accessToken ?? undefined,
+        ),
+      enabled: !!accessToken,
+      staleTime: 1000 * 15,
+      retry: 1,
+    });
 
   const actionButtonWidth = useMemo(() => {
     return Math.min(170, Math.floor((width - 56 - 12) / 2));
@@ -108,16 +140,15 @@ const MiniGameStartScreen = ({ miniGameId }: MiniGameStartScreenProps) => {
 
   const rankingEntries = useMemo<MiniGameRankingEntry[]>(() => {
     if (accessToken) {
-      return (myMiniGameResults ?? [])
-        .filter((result) => result.game_type === miniGame.id)
-        .map((result) => ({
-          friendId: `server-result-${result.result_id}`,
-          name: new Date(result.created_at).toLocaleDateString("ko-KR", {
-            month: "2-digit",
-            day: "2-digit",
-          }),
-          score: result.score,
-        }));
+      return (friendRankingList?.rankings ?? []).map((ranking) => ({
+        friendId: `server-ranking-${ranking.user_id}`,
+        name: ranking.nickname,
+        score: ranking.best_score,
+      }));
+    }
+
+    if (isGuestMode) {
+      return [];
     }
 
     return friendList.map((friend) => ({
@@ -129,27 +160,36 @@ const MiniGameStartScreen = ({ miniGameId }: MiniGameStartScreenProps) => {
         isInfiniteMode ? "infinite" : "normal",
       ),
     }));
-  }, [accessToken, friendList, isInfiniteMode, miniGame.id, myMiniGameResults]);
+  }, [
+    accessToken,
+    friendList,
+    friendRankingList,
+    isGuestMode,
+    isInfiniteMode,
+    miniGame.id,
+  ]);
   const rankingSummary = useMemo(() => {
-    if (!accessToken || !myMiniGameRanking) {
+    if (!accessToken || !miniGameRankingList) {
       return [];
     }
 
+    const myRanking = miniGameRankingList.rankings.find(
+      (ranking) => ranking.user_id === userId,
+    );
     const rankLabel =
-      myMiniGameRanking.rank !== null && myMiniGameRanking.rank !== undefined
-        ? `${myMiniGameRanking.rank.toLocaleString()}위`
+      myRanking?.rank !== null && myRanking?.rank !== undefined
+        ? `${myRanking.rank.toLocaleString()}위`
         : "순위 없음";
     const bestScoreLabel =
-      myMiniGameRanking.best_score !== null &&
-      myMiniGameRanking.best_score !== undefined
-        ? `${myMiniGameRanking.best_score.toLocaleString()}P`
+      myRanking?.best_score !== null && myRanking?.best_score !== undefined
+        ? `${myRanking.best_score.toLocaleString()}P`
         : "기록 없음";
 
     return [
       `내 최고점 ${bestScoreLabel}`,
-      `내 순위 ${rankLabel} / 참여 ${myMiniGameRanking.total_ranked_users.toLocaleString()}명`,
+      `내 순위 ${rankLabel} / 참여 ${miniGameRankingList.total_ranked_users.toLocaleString()}명`,
     ];
-  }, [accessToken, myMiniGameRanking]);
+  }, [accessToken, miniGameRankingList, userId]);
 
   const heartStatus = useMemo(
     () =>
@@ -414,7 +454,7 @@ const MiniGameStartScreen = ({ miniGameId }: MiniGameStartScreenProps) => {
               : "랭킹 데이터가 아직 없어요."
           }
           entries={rankingEntries}
-          isLoading={isRankingFetching || isResultsFetching}
+          isLoading={isRankingFetching || isFriendRankingFetching}
           onClose={() => setIsRankingOpen(false)}
           summary={rankingSummary}
           title={

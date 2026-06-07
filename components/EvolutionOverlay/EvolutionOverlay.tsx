@@ -5,11 +5,24 @@
  * @side-effects Animated timing, blink/smoke timeout 관리
  */
 /* eslint-disable react-hooks/refs, react-hooks/set-state-in-effect -- React Native Animated values and cutscene phase state are imperative by design. */
+import MainButton from "@/components/MainButton/MainButton";
 import type { CharacterGrade } from "@/constants/character";
 import { CHARACTER_IMAGES } from "@/constants/character";
+import { colors } from "@/constants/colors";
+import { fonts } from "@/constants/fonts";
 import { Image } from "expo-image";
-import { useEffect, useRef, useState } from "react";
-import { Animated, Easing, StyleSheet, View } from "react-native";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  Animated,
+  Easing,
+  Linking,
+  Modal,
+  Pressable,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from "react-native";
 
 interface EvolutionOverlayProps {
   fromGrade: CharacterGrade;
@@ -17,6 +30,25 @@ interface EvolutionOverlayProps {
   toGrade: CharacterGrade;
   visible: boolean;
 }
+
+type GraduationOverlayProps = {
+  achievementStats?: GraduationStatsSnapshot;
+  onExit: () => void;
+  onRestart: () => void;
+  userCreatedAt?: string | null;
+  visible: boolean;
+};
+
+type GraduationStep = "intro" | "certificate" | "stats" | "outro";
+type GraduationStatsSnapshot = {
+  feedCount: number;
+  miniGameBestScores?: {
+    catchBoo?: number;
+    catchTheMajor?: number;
+    freeThrow?: number;
+  };
+  quizCorrectCount: number;
+};
 
 export const EVOLUTION_BLINK_DURATIONS = [
   1000, 800, 700, 600, 550, 500, 450, 400, 350, 300, 250, 200, 100, 100, 100,
@@ -27,6 +59,300 @@ export const EVOLUTION_BLINK_DURATION_MS = EVOLUTION_BLINK_DURATIONS.reduce(
   (sum, duration) => sum + duration,
   0,
 );
+
+const GRADUATION_STEPS: GraduationStep[] = [
+  "intro",
+  "certificate",
+  "stats",
+  "outro",
+];
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+const getLocalDateStartMs = (date: Date) => {
+  const dateStart = new Date(date);
+
+  dateStart.setHours(0, 0, 0, 0);
+
+  return dateStart.getTime();
+};
+
+const getPlayDayCount = (createdAt?: string | null) => {
+  const createdAtMs = createdAt ? Date.parse(createdAt) : NaN;
+
+  if (!Number.isFinite(createdAtMs)) {
+    return 1;
+  }
+
+  const createdDateStartMs = getLocalDateStartMs(new Date(createdAtMs));
+  const todayStartMs = getLocalDateStartMs(new Date());
+  const elapsedDays = Math.floor((todayStartMs - createdDateStartMs) / DAY_MS);
+
+  return Math.max(elapsedDays + 1, 1);
+};
+
+const getGraduationStats = (
+  playDayCount: number,
+  achievementStats?: GraduationStatsSnapshot,
+) => [
+  ["졸업까지 걸린 날:", `${playDayCount}일`],
+  ["먹은 학식", `${achievementStats?.feedCount ?? 0}끼`],
+  ["맞춘퀴즈 수:", `${achievementStats?.quizCorrectCount ?? 0}개`],
+  [
+    "전공책 받기 최고 점수:",
+    `${achievementStats?.miniGameBestScores?.catchTheMajor ?? 0}P`,
+  ],
+  [
+    "부 잡기 최고 점수:",
+    `${achievementStats?.miniGameBestScores?.catchBoo ?? 0}P`,
+  ],
+  [
+    "자유투 넣기 최고 점수:",
+    `${achievementStats?.miniGameBestScores?.freeThrow ?? 0}P`,
+  ],
+] as const;
+
+const JOBKOREA_URL = "https://www.jobkorea.co.kr/";
+
+export function GraduationOverlay({
+  achievementStats,
+  onExit,
+  onRestart,
+  userCreatedAt,
+  visible,
+}: GraduationOverlayProps) {
+  const { width } = useWindowDimensions();
+  const booSlideX = useRef(new Animated.Value(54)).current;
+  const introAdvanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const [stepIndex, setStepIndex] = useState(0);
+
+  useEffect(() => {
+    if (introAdvanceTimerRef.current) {
+      clearTimeout(introAdvanceTimerRef.current);
+      introAdvanceTimerRef.current = null;
+    }
+
+    if (visible) {
+      setStepIndex(0);
+      booSlideX.stopAnimation();
+      booSlideX.setValue(54);
+
+      Animated.timing(booSlideX, {
+        duration: 1150,
+        easing: Easing.out(Easing.cubic),
+        toValue: 0,
+        useNativeDriver: true,
+      }).start(({ finished }) => {
+        if (!finished) {
+          return;
+        }
+
+        introAdvanceTimerRef.current = setTimeout(() => {
+          introAdvanceTimerRef.current = null;
+          setStepIndex((currentStepIndex) =>
+            currentStepIndex === 0 ? 1 : currentStepIndex,
+          );
+        }, 1000);
+      });
+
+      return () => {
+        booSlideX.stopAnimation();
+        if (introAdvanceTimerRef.current) {
+          clearTimeout(introAdvanceTimerRef.current);
+          introAdvanceTimerRef.current = null;
+        }
+      };
+    }
+
+    booSlideX.stopAnimation();
+    booSlideX.setValue(54);
+
+    return undefined;
+  }, [booSlideX, visible]);
+
+  const layout = useMemo(() => {
+    const contentWidth = Math.min(width - 44, 304);
+    const finalButtonWidth = Math.min((width - 76) / 2, 138);
+
+    return {
+      contentWidth,
+      finalButtonWidth,
+    };
+  }, [width]);
+
+  const currentStep = GRADUATION_STEPS[stepIndex];
+  const playDayCount = useMemo(
+    () => getPlayDayCount(userCreatedAt),
+    [userCreatedAt],
+  );
+  const graduationStats = useMemo(
+    () => getGraduationStats(playDayCount, achievementStats),
+    [achievementStats, playDayCount],
+  );
+  const canGoBack = stepIndex > 0;
+  const canGoNext = stepIndex < GRADUATION_STEPS.length - 1;
+
+  const goBack = () => {
+    if (!canGoBack) {
+      return;
+    }
+
+    setStepIndex((prev) => Math.max(prev - 1, 0));
+  };
+
+  const goNext = () => {
+    if (!canGoNext) {
+      return;
+    }
+
+    setStepIndex((prev) => Math.min(prev + 1, GRADUATION_STEPS.length - 1));
+  };
+
+  const handleLinkPress = () => {
+    void Linking.openURL(JOBKOREA_URL).catch((error) => {
+      console.warn("잡코리아 링크 열기 실패", error);
+    });
+  };
+
+  return (
+    <Modal
+      animationType="fade"
+      onRequestClose={goBack}
+      presentationStyle="overFullScreen"
+      statusBarTranslucent
+      transparent
+      visible={visible}
+    >
+      <View style={graduationStyles.root}>
+        <Image
+          cachePolicy="memory-disk"
+          contentFit="cover"
+          source={require("@/assets/images/graduate-background.png")}
+          style={StyleSheet.absoluteFill}
+        />
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            graduationStyles.graduatedBoo,
+            {
+              transform: [{ translateX: booSlideX }],
+            },
+          ]}
+        >
+          <Image
+            cachePolicy="memory-disk"
+            contentFit="contain"
+            source={require("@/assets/characters/graduated-boo.png")}
+            style={graduationStyles.graduatedBooImage}
+          />
+        </Animated.View>
+
+        <View pointerEvents="box-none" style={graduationStyles.touchLayer}>
+          <Pressable
+            disabled={!canGoBack}
+            onPress={goBack}
+            style={graduationStyles.touchHalf}
+          />
+          <Pressable
+            disabled={!canGoNext}
+            onPress={goNext}
+            style={graduationStyles.touchHalf}
+          />
+        </View>
+
+        <View pointerEvents="box-none" style={graduationStyles.contentLayer}>
+          {currentStep === "certificate" ? (
+            <View
+              pointerEvents="none"
+              style={[
+                graduationStyles.panel,
+                graduationStyles.certificatePanel,
+                { width: layout.contentWidth },
+              ]}
+            >
+              <Text style={graduationStyles.certificateTitle}>졸업장</Text>
+              <Text style={graduationStyles.certificateBody}>
+                위 부는 지난 {playDayCount}일 동안{"\n"}
+                훌륭하게 성장하였기에{"\n"}이 졸업장을 수여합니다
+              </Text>
+              <Text style={graduationStyles.certificateDate}>
+                2026년 5월 13일
+              </Text>
+            </View>
+          ) : null}
+
+          {currentStep === "stats" ? (
+            <View
+              pointerEvents="none"
+              style={[
+                graduationStyles.panel,
+                graduationStyles.statsPanel,
+                { width: layout.contentWidth },
+              ]}
+            >
+              <Text style={graduationStyles.statsTitle}>
+                졸업을 축하합니다!
+              </Text>
+              <View style={graduationStyles.statsList}>
+                {graduationStats.map(([label, value]) => (
+                  <View key={label} style={graduationStyles.statsRow}>
+                    <Text style={graduationStyles.statsLabel}>{label}</Text>
+                    <Text style={graduationStyles.statsValue}>{value}</Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+          ) : null}
+
+          {currentStep === "outro" ? (
+            <View style={graduationStyles.outroContent}>
+              <View
+                style={[
+                  graduationStyles.panel,
+                  graduationStyles.outroPanel,
+                  { width: layout.contentWidth },
+                ]}
+              >
+                <Text style={graduationStyles.outroTitle}>이제는 사회다!</Text>
+                <Pressable
+                  onPress={handleLinkPress}
+                  style={graduationStyles.linkButton}
+                >
+                  <Text style={graduationStyles.linkText}>
+                    잡코리아 링크 〉
+                  </Text>
+                </Pressable>
+              </View>
+              <View style={graduationStyles.finalButtonRow}>
+                <MainButton
+                  color="gray"
+                  label="게임종료"
+                  onPress={onExit}
+                  size="S"
+                  width={layout.finalButtonWidth}
+                />
+                <MainButton
+                  label="처음으로"
+                  onPress={onRestart}
+                  size="S"
+                  width={layout.finalButtonWidth}
+                />
+              </View>
+            </View>
+          ) : null}
+
+          {canGoNext ? (
+            <Text pointerEvents="none" style={graduationStyles.continueText}>
+              화면을 터치하여 계속
+            </Text>
+          ) : null}
+        </View>
+      </View>
+    </Modal>
+  );
+}
 
 function EvolutionOverlay({
   fromGrade,
@@ -197,6 +523,161 @@ const styles = StyleSheet.create({
   bigSmoke: {
     width: "124%",
     height: "124%",
+  },
+});
+
+const graduationStyles = StyleSheet.create({
+  root: {
+    flex: 1,
+    backgroundColor: colors.BLACK_NORMAL,
+  },
+  contentLayer: {
+    ...StyleSheet.absoluteFill,
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 20,
+    elevation: 20,
+  },
+  graduatedBoo: {
+    position: "absolute",
+    right: "-52%",
+    bottom: "-18%",
+    width: "177%",
+    aspectRatio: 1,
+  },
+  graduatedBooImage: {
+    width: "100%",
+    height: "100%",
+  },
+  panel: {
+    alignSelf: "center",
+    backgroundColor: colors.WHITE_NORMAL,
+    borderWidth: 2,
+    borderColor: colors.BLACK_NORMAL,
+    alignItems: "center",
+  },
+  certificatePanel: {
+    paddingHorizontal: 22,
+    paddingVertical: 28,
+    gap: 16,
+  },
+  certificateTitle: {
+    fontFamily: fonts.BASIC,
+    fontSize: 26,
+    lineHeight: 32,
+    color: colors.BLACK_NORMAL,
+    includeFontPadding: false,
+  },
+  certificateBody: {
+    fontFamily: fonts.BASIC,
+    fontSize: 15,
+    lineHeight: 24,
+    textAlign: "center",
+    color: colors.BLACK_NORMAL,
+    includeFontPadding: false,
+  },
+  certificateDate: {
+    fontFamily: fonts.BASIC,
+    fontSize: 13,
+    lineHeight: 18,
+    color: colors.BLACK_NORMAL,
+    includeFontPadding: false,
+  },
+  statsPanel: {
+    paddingHorizontal: 22,
+    paddingVertical: 22,
+    gap: 16,
+  },
+  statsTitle: {
+    fontFamily: fonts.BASIC,
+    fontSize: 24,
+    lineHeight: 30,
+    color: colors.BLACK_NORMAL,
+    includeFontPadding: false,
+  },
+  statsList: {
+    width: "100%",
+    gap: 10,
+  },
+  statsRow: {
+    flexDirection: "row",
+    justifyContent: "center",
+    gap: 14,
+  },
+  statsLabel: {
+    minWidth: 142,
+    textAlign: "right",
+    fontFamily: fonts.BASIC,
+    fontSize: 12,
+    lineHeight: 17,
+    color: colors.BLACK_NORMAL,
+    includeFontPadding: false,
+  },
+  statsValue: {
+    minWidth: 44,
+    fontFamily: fonts.BASIC,
+    fontSize: 12,
+    lineHeight: 17,
+    color: colors.BLACK_NORMAL,
+    includeFontPadding: false,
+  },
+  outroContent: {
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  outroPanel: {
+    position: "relative",
+    paddingHorizontal: 20,
+    paddingVertical: 24,
+    gap: 18,
+  },
+  outroTitle: {
+    fontFamily: fonts.BASIC,
+    fontSize: 24,
+    lineHeight: 30,
+    color: colors.BLACK_NORMAL,
+    includeFontPadding: false,
+  },
+  linkButton: {
+    minHeight: 28,
+    justifyContent: "center",
+  },
+  linkText: {
+    fontFamily: fonts.BASIC,
+    fontSize: 14,
+    lineHeight: 18,
+    color: colors.GREEN_NORMAL,
+    includeFontPadding: false,
+  },
+  finalButtonRow: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 28,
+  },
+  touchLayer: {
+    ...StyleSheet.absoluteFill,
+    zIndex: 10,
+    elevation: 10,
+    flexDirection: "row",
+  },
+  touchHalf: {
+    flex: 1,
+  },
+  continueText: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    top: 46,
+    textAlign: "center",
+    fontFamily: fonts.BASIC,
+    fontSize: 18,
+    lineHeight: 18,
+    color: colors.WHITE_NORMAL,
+    includeFontPadding: false,
+    textShadowColor: colors.BLACK_NORMAL,
+    textShadowOffset: { height: 1, width: 1 },
+    textShadowRadius: 0,
+    opacity: 0.8,
   },
 });
 

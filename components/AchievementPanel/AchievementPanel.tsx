@@ -13,9 +13,14 @@ import {
 import { colors } from "@/constants/colors";
 import { fonts } from "@/constants/fonts";
 import { useGameStore } from "@/stores/useGameStore";
+import {
+  listMyAchievementProgress,
+  type AchievementProgress,
+} from "@/utils/serverApi";
 import { playSoundEffect } from "@/utils/soundEffects";
 import { Feather } from "@expo/vector-icons";
-import { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useEffect, useMemo, useState } from "react";
 import {
   Pressable,
   ScrollView,
@@ -29,6 +34,51 @@ type AchievementPanelProps = {
 };
 
 const COLLAPSED_VISIBLE_COUNT = 5;
+
+type DisplayAchievement = {
+  isCompleted: boolean;
+  key: string;
+  progress: number;
+  rewardLabel: string;
+  sortOrder: number;
+  targetValue: number;
+  title: string;
+};
+
+const getServerAchievementRewardLabel = (
+  achievement: Pick<
+    AchievementProgress,
+    "reward_item_key" | "reward_type" | "reward_value"
+  >,
+) => {
+  const rewardType = achievement.reward_type.toLowerCase();
+
+  if (rewardType === "coin" && typeof achievement.reward_value === "number") {
+    return `${achievement.reward_value.toLocaleString()}코인`;
+  }
+
+  if (
+    (rewardType === "xp" || rewardType === "xp_point") &&
+    typeof achievement.reward_value === "number"
+  ) {
+    return `${achievement.reward_value.toLocaleString()}XP`;
+  }
+
+  if (rewardType === "skin" || rewardType === "item") {
+    switch (achievement.reward_item_key) {
+      case "skin_creation":
+        return "창조 외형 획득";
+      case "skin_peace":
+        return "평화 외형 획득";
+      case "skin_truth":
+        return "진리 외형 획득";
+      default:
+        return "외형 획득";
+    }
+  }
+
+  return "보상 지급";
+};
 
 const getProgressValue = (
   conditionType: AchievementConditionType,
@@ -71,12 +121,36 @@ const getProgressValue = (
 
 const AchievementPanel = ({ onClose }: AchievementPanelProps) => {
   const [isExpanded, setIsExpanded] = useState(false);
+  const accessToken = useGameStore((state) => state.accessToken);
   const achievementStats = useGameStore((state) => state.achievementStats);
   const completedAchievementKeys = useGameStore(
     (state) => state.completedAchievementKeys,
   );
   const friendList = useGameStore((state) => state.friendList);
+  const syncServerAchievementProgress = useGameStore(
+    (state) => state.syncServerAchievementProgress,
+  );
   const totalXp = useGameStore((state) => state.totalXp);
+  const {
+    data: serverAchievements,
+    isError: isServerAchievementError,
+    isFetching: isServerAchievementFetching,
+  } = useQuery({
+    enabled: !!accessToken,
+    queryFn: () => listMyAchievementProgress(accessToken ?? undefined),
+    queryKey: ["achievements", "me", accessToken],
+    refetchOnMount: "always",
+    staleTime: 0,
+  });
+
+  useEffect(() => {
+    if (!serverAchievements) {
+      return;
+    }
+
+    syncServerAchievementProgress(serverAchievements);
+  }, [serverAchievements, syncServerAchievementProgress]);
+
   const completedKeySet = useMemo(
     () => new Set(completedAchievementKeys),
     [completedAchievementKeys],
@@ -99,7 +173,7 @@ const AchievementPanel = ({ onClose }: AchievementPanelProps) => {
     }),
     [achievementStats, completedAchievementKeys.length, friendList.length, totalXp],
   );
-  const achievements = useMemo(
+  const localAchievements = useMemo<DisplayAchievement[]>(
     () =>
       [...ACHIEVEMENT_DEFINITIONS]
         .sort((a, b) => a.sortOrder - b.sortOrder)
@@ -110,13 +184,40 @@ const AchievementPanel = ({ onClose }: AchievementPanelProps) => {
           );
 
           return {
-            ...achievement,
+            key: achievement.key,
             isCompleted: completedKeySet.has(achievement.key),
             progress,
+            rewardLabel: getAchievementRewardLabel(achievement.reward),
+            sortOrder: achievement.sortOrder,
+            targetValue: achievement.targetValue,
+            title: achievement.title,
           };
         }),
     [completedKeySet, progressState],
   );
+  const serverDisplayAchievements = useMemo<DisplayAchievement[] | null>(
+    () =>
+      serverAchievements
+        ? [...serverAchievements]
+            .sort((a, b) => a.sort_order - b.sort_order)
+            .map((achievement) => {
+              const isCompleted =
+                achievement.completed || achievement.claimed;
+
+              return {
+                isCompleted,
+                key: achievement.achievement_key,
+                progress: achievement.progress_value,
+                rewardLabel: getServerAchievementRewardLabel(achievement),
+                sortOrder: achievement.sort_order,
+                targetValue: achievement.target_value,
+                title: achievement.title,
+              };
+            })
+        : null,
+    [serverAchievements],
+  );
+  const achievements = serverDisplayAchievements ?? localAchievements;
   const visibleAchievements = isExpanded
     ? achievements
     : achievements.slice(0, COLLAPSED_VISIBLE_COUNT);
@@ -144,8 +245,19 @@ const AchievementPanel = ({ onClose }: AchievementPanelProps) => {
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
         >
+          {accessToken &&
+          isServerAchievementFetching &&
+          !serverDisplayAchievements ? (
+            <Text style={styles.statusText}>업적을 불러오는 중이에요.</Text>
+          ) : null}
+          {accessToken &&
+          isServerAchievementError &&
+          !serverDisplayAchievements ? (
+            <Text style={styles.statusText}>
+              서버 업적을 불러오지 못했어요.
+            </Text>
+          ) : null}
           {visibleAchievements.map((achievement) => {
-            const rewardLabel = getAchievementRewardLabel(achievement.reward);
             const progressLabel = `${Math.min(
               achievement.progress,
               achievement.targetValue,
@@ -189,7 +301,7 @@ const AchievementPanel = ({ onClose }: AchievementPanelProps) => {
                     achievement.isCompleted && styles.rewardTextCompleted,
                   ]}
                 >
-                  {achievement.isCompleted ? "달성" : rewardLabel}
+                  {achievement.isCompleted ? "달성" : achievement.rewardLabel}
                 </Text>
               </View>
             );
@@ -273,6 +385,13 @@ const styles = StyleSheet.create({
   listContent: {
     gap: 10,
     paddingBottom: 2,
+  },
+  statusText: {
+    fontFamily: fonts.BASIC,
+    fontSize: 14,
+    lineHeight: 18,
+    color: colors.GRAY_NORMAL,
+    includeFontPadding: false,
   },
   achievementRow: {
     width: "100%",

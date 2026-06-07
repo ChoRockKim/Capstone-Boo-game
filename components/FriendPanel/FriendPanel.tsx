@@ -3,11 +3,17 @@ import UserAdd from "@/assets/icons/user-add.svg";
 import { colors } from "@/constants/colors";
 import { fonts } from "@/constants/fonts";
 import { useGameStore } from "@/stores/useGameStore";
-import { listFriends } from "@/utils/serverApi";
+import {
+  acceptFriendRequest,
+  deleteFriendRequest,
+  FriendRequestOut,
+  listFriendRequests,
+  listFriends,
+} from "@/utils/serverApi";
 import { mapFriendOutToFriendListItem } from "@/utils/serverFriendAdapter";
 import { playSoundEffect } from "@/utils/soundEffects";
 import { Feather } from "@expo/vector-icons";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { router } from "expo-router";
 import React, { useMemo, useState } from "react";
 import { FlatList, Pressable, StyleSheet, Text, View } from "react-native";
@@ -24,8 +30,15 @@ const PAGE_SIZE = 5;
 
 const FriendPanel = ({ setIsFriendOpen }: FriendPanelProps) => {
   const accessToken = useGameStore((state) => state.accessToken);
+  const applyServerUnlockedAchievements = useGameStore(
+    (state) => state.applyServerUnlockedAchievements,
+  );
   const friendList = useGameStore((state) => state.friendList);
+  const isGuestMode = useGameStore((state) => state.isGuestMode);
+  const userId = useGameStore((state) => state.userId);
+  const queryClient = useQueryClient();
   const [isFriendAddOpen, setIsFriendAddOpen] = useState(false);
+  const [processingRequestIds, setProcessingRequestIds] = useState<number[]>([]);
   const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_COUNT);
   const { data: serverFriends, refetch: refetchServerFriends } = useQuery({
     queryKey: ["friends", accessToken],
@@ -34,12 +47,32 @@ const FriendPanel = ({ setIsFriendOpen }: FriendPanelProps) => {
     staleTime: 1000 * 30,
     retry: 1,
   });
+  const { data: friendRequests } = useQuery({
+    queryKey: ["friends", "requests", accessToken],
+    queryFn: () => listFriendRequests(accessToken ?? undefined),
+    enabled: !!accessToken,
+    staleTime: 1000 * 30,
+    retry: 1,
+  });
+  const incomingFriendRequests = useMemo(
+    () =>
+      accessToken
+        ? (friendRequests ?? []).filter(
+            (request) =>
+              request.receiver.user_id === userId &&
+              request.status.toLowerCase() === "pending",
+          )
+        : [],
+    [accessToken, friendRequests, userId],
+  );
   const displayFriendList = useMemo(
     () =>
       accessToken
         ? (serverFriends?.map(mapFriendOutToFriendListItem) ?? [])
-        : friendList,
-    [accessToken, friendList, serverFriends],
+        : isGuestMode
+          ? []
+          : friendList,
+    [accessToken, friendList, isGuestMode, serverFriends],
   );
   const clampedVisibleCount = Math.min(
     visibleCount,
@@ -58,6 +91,10 @@ const FriendPanel = ({ setIsFriendOpen }: FriendPanelProps) => {
   };
 
   const handleFriendAddPress = () => {
+    if (isGuestMode) {
+      return;
+    }
+
     playSoundEffect("basicClick");
     setIsFriendAddOpen(true);
   };
@@ -81,6 +118,61 @@ const FriendPanel = ({ setIsFriendOpen }: FriendPanelProps) => {
     });
   };
 
+  const refetchFriendData = () => {
+    void refetchServerFriends();
+    void queryClient.invalidateQueries({
+      queryKey: ["friends", "requests", accessToken],
+    });
+  };
+
+  const handleAcceptRequest = async (request: FriendRequestOut) => {
+    if (!accessToken || processingRequestIds.includes(request.request_id)) {
+      return;
+    }
+
+    playSoundEffect("basicClick");
+    setProcessingRequestIds((currentIds) => [
+      ...currentIds,
+      request.request_id,
+    ]);
+
+    try {
+      const result = await acceptFriendRequest(request.request_id, accessToken);
+
+      applyServerUnlockedAchievements(result.unlocked_achievements);
+      refetchFriendData();
+    } catch (error) {
+      console.warn("친구 요청 수락 실패", error);
+    } finally {
+      setProcessingRequestIds((currentIds) =>
+        currentIds.filter((requestId) => requestId !== request.request_id),
+      );
+    }
+  };
+
+  const handleRejectRequest = async (request: FriendRequestOut) => {
+    if (!accessToken || processingRequestIds.includes(request.request_id)) {
+      return;
+    }
+
+    playSoundEffect("basicClick");
+    setProcessingRequestIds((currentIds) => [
+      ...currentIds,
+      request.request_id,
+    ]);
+
+    try {
+      await deleteFriendRequest(request.request_id, accessToken);
+      refetchFriendData();
+    } catch (error) {
+      console.warn("친구 요청 거절 실패", error);
+    } finally {
+      setProcessingRequestIds((currentIds) =>
+        currentIds.filter((requestId) => requestId !== request.request_id),
+      );
+    }
+  };
+
   const renderFriendItem = ({
     index,
     item,
@@ -102,8 +194,12 @@ const FriendPanel = ({ setIsFriendOpen }: FriendPanelProps) => {
           <Text style={styles.headerText}>친구</Text>
           <View style={styles.headerButtonGroup}>
             <Pressable
+              disabled={isGuestMode}
               onPress={handleFriendAddPress}
-              style={styles.headerButton}
+              style={[
+                styles.headerButton,
+                isGuestMode && styles.headerButtonDisabled,
+              ]}
             >
               <UserAdd width={24} height={24} color={colors.BLACK_NORMAL} />
             </Pressable>
@@ -112,6 +208,48 @@ const FriendPanel = ({ setIsFriendOpen }: FriendPanelProps) => {
             </Pressable>
           </View>
         </View>
+        {incomingFriendRequests.length > 0 ? (
+          <View style={styles.requestList}>
+            <Text style={styles.requestHeaderText}>받은 요청</Text>
+            {incomingFriendRequests.map((request) => {
+              const isProcessing = processingRequestIds.includes(
+                request.request_id,
+              );
+
+              return (
+                <View key={request.request_id} style={styles.requestRow}>
+                  <Text numberOfLines={1} style={styles.requestNameText}>
+                    {request.requester.nickname}
+                  </Text>
+                  <View style={styles.requestActionRow}>
+                    <Pressable
+                      disabled={isProcessing}
+                      onPress={() => handleAcceptRequest(request)}
+                      style={[
+                        styles.requestActionButton,
+                        styles.acceptButton,
+                        isProcessing && styles.requestActionButtonDisabled,
+                      ]}
+                    >
+                      <Text style={styles.requestActionText}>수락</Text>
+                    </Pressable>
+                    <Pressable
+                      disabled={isProcessing}
+                      onPress={() => handleRejectRequest(request)}
+                      style={[
+                        styles.requestActionButton,
+                        styles.rejectButton,
+                        isProcessing && styles.requestActionButtonDisabled,
+                      ]}
+                    >
+                      <Text style={styles.requestActionText}>거절</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+        ) : null}
         <FlatList
           data={visibleFriends}
           keyExtractor={(item) => item.id}
@@ -158,7 +296,7 @@ const FriendPanel = ({ setIsFriendOpen }: FriendPanelProps) => {
         <FriendAddModal
           onClose={() => setIsFriendAddOpen(false)}
           onFriendChanged={() => {
-            void refetchServerFriends();
+            refetchFriendData();
           }}
         />
       ) : null}
@@ -208,8 +346,68 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  headerButtonDisabled: {
+    opacity: 0.35,
+  },
   listContent: {
     gap: 10,
+  },
+  requestList: {
+    marginBottom: 14,
+    gap: 8,
+  },
+  requestHeaderText: {
+    fontFamily: fonts.BASIC,
+    fontSize: 16,
+    lineHeight: 20,
+    color: colors.BLACK_NORMAL,
+    includeFontPadding: false,
+  },
+  requestRow: {
+    minHeight: 44,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: colors.GRAY_NORMAL_ACTIVE,
+    backgroundColor: colors.SILVER_LIGHT_HOVER,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  requestNameText: {
+    flex: 1,
+    fontFamily: fonts.BASIC,
+    fontSize: 16,
+    lineHeight: 20,
+    color: colors.BLACK_NORMAL,
+    includeFontPadding: false,
+  },
+  requestActionRow: {
+    flexDirection: "row",
+    gap: 6,
+  },
+  requestActionButton: {
+    minWidth: 52,
+    height: 30,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: colors.BLACK_NORMAL,
+  },
+  acceptButton: {
+    backgroundColor: colors.GREEN_NORMAL,
+  },
+  rejectButton: {
+    backgroundColor: colors.DANGER,
+  },
+  requestActionButtonDisabled: {
+    opacity: 0.5,
+  },
+  requestActionText: {
+    fontFamily: fonts.BASIC,
+    fontSize: 14,
+    lineHeight: 18,
+    color: colors.WHITE_NORMAL,
+    includeFontPadding: false,
   },
   list: {
     minHeight: 220,

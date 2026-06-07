@@ -35,7 +35,12 @@
 | 학식 | 오늘 학식, 먹이기 가능 상태, 먹이기 처리 | `/school-foods/*` |
 | 퀴즈 | 플레이 가능 상태, 다음 문제, 제출 결과 | `/quizzes/*` |
 | 마이룸 | 서버 방 상태, 상점 아이템, 구매/장착 상태 | `/rooms/me`, `/shop/items` |
-| 미니게임 | 결과 저장, 보상 지급, 내 랭킹 요약 | `/minigames/results`, `/economy/minigame/play`, `/minigames/ranking/me` |
+| 미니게임 | 세션 시작, 보상 지급, 결과 저장, 랭킹 목록 | `/economy/minigame/start`, `/economy/minigame/reward`, `/minigames/results`, `/minigames/rankings`, `/minigames/rankings/friends` |
+
+참고:
+
+- 프로필 이미지는 `/user/me`로 복구 가능한 서버 값이지만, 현재 설정 > 나의 계정 화면에서는 프로필 이미지 변경/삭제 UI를 노출하지 않습니다.
+- 게스트 모드는 서버 복구 대상이 아닙니다. `guestGameSnapshot`으로 휴대폰 저장소에 별도 보관하고, 친구/방명록/친구 랭킹 API는 게스트에서 호출하지 않습니다.
 
 ## 위험도 높음
 
@@ -120,9 +125,35 @@
 
 - 높음. 유저가 구매한 아이템이 새 기기에서 사라진 것처럼 보이면 신뢰도에 큰 영향이 있습니다.
 
+### 4. 캐릭터 코스튬 장착 상태
+
+관련 persist 값:
+
+- `characterCostumeKey`
+- `ownedAchievementSkins`
+
+문제:
+
+- 마이룸 옷장 UI에서 `default`, `skin_truth`, `skin_peace`, `skin_creation` 코스튬을 선택할 수 있지만, 선택한 장착 상태는 현재 로컬 persist에만 저장됩니다.
+- `ownedAchievementSkins`는 업적 서버 응답의 `reward_item_key`로 복구할 수 있지만, 어떤 스킨을 장착 중인지는 현재 서버에서 내려주지 않습니다.
+- 새 기기에서는 유저가 기존 기기에서 선택한 코스튬이 `default`로 보일 수 있습니다.
+- 친구 방에서 상대방이 장착한 코스튬을 표시하려면 친구 방 응답에도 장착 코스튬 key가 필요합니다.
+
+권장 해결:
+
+- `CharacterMeOut`, `/app/bootstrap.character`에 `equipped_skin_key`를 추가합니다.
+- `PUT /characters/me` 또는 별도 `PUT /characters/me/costume`로 `equipped_skin_key` 저장을 지원합니다.
+- 허용값은 `default`, `skin_truth`, `skin_peace`, `skin_creation`으로 제한합니다.
+- non-default 값은 서버에서 해당 업적 스킨 소유 여부를 검증합니다.
+- 친구 방에서 코스튬을 보여줄 계획이면 `RoomCharacterOut`에도 동일 필드를 추가합니다.
+
+우선순위:
+
+- 높음. 과금/보상형 외형은 아니더라도 업적 보상으로 받은 외형 선택이 기기 간 사라지면 보상 체감과 신뢰도에 영향이 있습니다.
+
 ## 위험도 중간
 
-### 4. 튜토리얼 완료 여부
+### 5. 튜토리얼 완료 여부
 
 관련 persist 값:
 
@@ -142,7 +173,7 @@
 
 - 중간. 데이터 손실은 아니지만 새 기기 첫 경험에 영향을 줍니다.
 
-### 5. 사운드/환경 설정
+### 6. 사운드/환경 설정
 
 관련 persist 값:
 
@@ -196,20 +227,22 @@
 관련 상태/데이터:
 
 - `FriendListDummyData` 기반 fallback 점수
+- `/minigames/rankings`
+- `/minigames/rankings/friends`
 - `/minigames/ranking/me`
-- `/minigames/results/me`
 
 문제:
 
-- 서버에는 현재 내 랭킹 요약과 내 결과 조회만 연결되어 있습니다.
-- 전체 랭킹 또는 친구 랭킹 리스트 API가 없으면 새 기기에서도 실제 랭킹 목록을 완전히 표시할 수 없습니다.
-- 로그인 상태에서는 더미 친구 점수를 현재 랭킹 기준으로 쓰지 않도록 정리했지만, 랭킹 모달의 풍부한 목록 경험은 제한됩니다.
+- 전체/친구 랭킹 목록 API는 추가되었고, 로그인 상태에서는 `/minigames/rankings`, `/minigames/rankings/friends`를 사용합니다.
+- `/minigames/ranking/me`는 개인 요약용이며 game type/mode query parameter가 없으므로 게임별 랭킹 목록 기준으로 쓰지 않습니다.
+- 로그인 상태에서는 더미 친구 점수를 현재 랭킹 기준으로 쓰지 않습니다.
+- 게스트 상태에서는 친구 랭킹 fallback을 표시하지 않습니다.
 
 권장 해결:
 
-- 백엔드에 게임 타입/모드별 랭킹 목록 API를 추가합니다.
-- 예: `GET /minigames/ranking?game_type=catch_the_major&mode=normal`
-- 친구 랭킹이 필요하면 `scope=friends` 또는 별도 `/minigames/ranking/friends`를 추가합니다.
+- 게임 타입/모드별 목록은 현재 `/minigames/rankings`, `/minigames/rankings/friends`의 `game_type`, `mode`, `limit` query로 조회합니다.
+- 프론트는 로그인 상태에서 더미 점수로 서버 랭킹을 덮지 않는 분기를 유지합니다.
+- 게스트 랭킹을 별도로 보여줄 정책이 생기면 서버 API가 아니라 로컬 전용 랭킹으로 분리합니다.
 
 우선순위:
 

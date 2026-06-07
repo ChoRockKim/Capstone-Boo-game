@@ -17,6 +17,63 @@
 5. Rooms/shop: items, purchase, equip, guestbook
 6. Economy/minigames: heart/coin status, result save, ranking
 
+## 2026-06-04 OpenAPI Update Notes
+
+- Operation count increased from 60 to 87 and schema count increased from 50 to 86.
+- `GET /school-foods/today` now returns `SchoolFoodToday` with `sections[]`, not a flat `SchoolFood[]`.
+- `GET /rooms/{user_id}/guestbook` now returns `GuestbookPage` with `items[]` and `next_cursor`.
+- Mini-game ranking list APIs are now available:
+  - `GET /minigames/rankings`
+  - `GET /minigames/rankings/friends`
+  - Both accept `game_type`, `mode`, and `limit` query parameters.
+- Mini-game economy flow now has session-oriented APIs:
+  - `POST /economy/minigame/start`
+  - `POST /economy/minigame/reward`
+  - Legacy `POST /economy/minigame/play` still exists.
+- User profile image and preferences APIs were added under `/user/me/image` and `/user/me/preferences`.
+- Frontend currently does not expose profile image edit/delete in the settings profile UI. `/user/me/image` remains documented as an available backend endpoint, not an active frontend workflow.
+- User-scoped character APIs were added under `/characters/me`, including XP, evolution confirmation, meal health, and meal penalty.
+- Character costume/equipped skin persistence is still missing from the OpenAPI. Frontend currently supports local closet selection for `default`, `skin_truth`, `skin_peace`, and `skin_creation`, but no server field stores the selected key.
+- Achievement APIs were added under `/achievements`, and many gameplay responses can include `unlocked_achievements`.
+- Several admin-like CRUD endpoints that were previously public now require auth in the OpenAPI security metadata.
+
+## 2026-06-07 Costume API Gap Notes
+
+- Local and remote OpenAPI were checked for costume/skin/outfit/appearance persistence.
+- No current schema field stores the selected character costume.
+- Frontend now has local closet selection, but server persistence needs a new contract.
+- Recommended contract: add `equipped_skin_key` to `CharacterMeOut`, `CharacterMeUpdate`, and `AppBootstrap.character`.
+- Include `equipped_skin_key` in `RoomCharacterOut` too if friend rooms should show the other user's selected costume.
+- Do not overload `state`; it is already used for character behavior state.
+
+## 2026-06-08 Backend Contract Updates Needed
+
+최근 프론트 보강 후에도 백엔드 계약이 추가되어야 완전히 서버 권위 상태로 전환되는 항목입니다.
+
+- Character costume persistence:
+  - `CharacterMeOut`, `CharacterMeUpdate`, `AppBootstrap.character`, `RoomCharacterOut`에 `equipped_skin_key` 추가 필요.
+  - 허용값은 `default`, `skin_truth`, `skin_peace`, `skin_creation`.
+  - non-default skin은 업적 보상 소유 여부를 서버에서 검증해야 함.
+- Graduation summary:
+  - 현재 졸업 화면의 플레이 일수는 가입일(`created_at`) 기준으로 프론트에서 계산함.
+  - 졸업 화면의 학식 횟수, 퀴즈 정답 수, 미니게임 최고 점수는 로컬/게스트 통계로 표시함.
+  - 계정/기기 간 일관된 졸업 리포트가 필요하면 서버가 `feed_count`, `quiz_correct_count`, `minigame_best_scores`, `graduated_at` 같은 요약 필드를 제공해야 함.
+- Guest mode:
+  - 게스트 모드는 로컬 전용 정책임. `accessToken`을 비우고 API Authorization header를 제거한 뒤 `guestGameSnapshot`만 사용함.
+  - 게스트에서는 친구 목록, 친구 추가, 친구 방, 방명록, 친구 랭킹 API를 호출하지 않고 사용 불가 모달을 표시함.
+  - 게스트 진행도를 서버와 병합하는 기능은 현재 없음. 추후 계정 전환/가입 시 이관이 필요하면 별도 import/merge API가 필요함.
+- Developer panel:
+  - 현재 서버에 반영되는 항목은 부 이름, 부 상태, 튜토리얼 조회 초기화 중심임.
+  - 코인 직접 조작, XP 절대값 설정/감소, 학년 강제 변경, 식사/퀴즈 제한 토글은 서버 admin/debug endpoint가 없어 로컬 테스트 상태로만 처리함.
+  - 서버 반영이 필요하면 authenticated admin-only debug API가 필요함.
+- Mini-game results:
+  - 로그인 상태는 `/economy/minigame/start`, `/economy/minigame/reward`, `/minigames/results`를 사용함.
+  - 게스트는 로컬 하트/보상/통계만 사용함.
+  - 결과 저장과 보상 지급의 중복 방지를 서버에서 보장하려면 `play_session_id` 기준 idempotency 정책을 명확히 해야 함.
+- Profile image:
+  - `/user/me/image`는 OpenAPI에 있으나 현재 설정 UI에서는 프로필 이미지 변경/삭제 workflow를 제거함.
+  - 정책상 유지 가능하지만, 현재 활성 프론트 기능은 아님.
+
 ## Backend Reference Notes
 
 이 섹션은 백엔드 README/운영 메모 기반 보조 설명입니다. 아래 정책은 OpenAPI 스키마와 함께 확인하고, 실제 서버 동작이 다르면 Swagger/실서버 응답을 우선합니다.
@@ -104,7 +161,18 @@
 
 - 사용자별 캐릭터 정보를 저장합니다.
 - 캐릭터는 이름과 성장 단계 값을 가집니다.
+- 현재 OpenAPI의 user-scoped character 응답/수정 스키마에는 장착 코스튬/스킨 필드가 없습니다.
+- 마이룸 옷장 선택을 서버에 저장하려면 `equipped_skin_key` 같은 stable key가 필요합니다.
+- 권장 허용값은 `default`, `skin_truth`, `skin_peace`, `skin_creation`입니다.
+- `state`는 `basic1`, `hungry`, `eating` 같은 캐릭터 행동 상태이므로 코스튬 저장용으로 재사용하지 않습니다.
+- non-default skin은 업적 보상 소유 여부를 서버에서 검증해야 합니다.
 - 관련 API:
+  - `GET /characters/me`
+  - `PUT /characters/me`
+  - `POST /characters/me/xp`
+  - `POST /characters/me/evolve/confirm`
+  - `GET /characters/me/meal-health`
+  - `POST /characters/me/meal-penalty/apply`
   - `POST /characters/`
   - `GET /characters/`
   - `GET /characters/{character_id}`
@@ -119,7 +187,7 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | POST | `/user/signup/email` | no | SignupEmailRequest | SignupEmailVerificationOut | - | Request Signup Email Verification |
 | POST | `/user/signup/verify` | no | SignupEmailVerificationRequest | - | - | Verify Signup Email |
-| GET | `/user/` | no | - | UserOut[] | - | List Users |
+| GET | `/user/` | yes | - | UserOut[] | - | List Users |
 | POST | `/user/` | no | UserCreate | UserOut | - | Create User |
 | POST | `/user/login` | no | UserLogin | TokenWithRefresh | - | Login |
 | POST | `/user/password-reset-request` | no | PasswordResetRequest | - | - | Request Password Reset |
@@ -128,37 +196,57 @@
 | GET | `/user/me` | yes | - | UserOut | - | Read Current User |
 | PUT | `/user/me` | yes | UserAccountUpdate | UserOut | - | Update Current User |
 | DELETE | `/user/me` | yes | - | - | - | Delete Current User |
+| POST | `/user/me/image` | yes | ProfileImageRequest | ProfileImageOut | - | Update Current User Image |
+| DELETE | `/user/me/image` | yes | - | ProfileImageOut | - | Delete Current User Image |
+| GET | `/user/me/preferences` | yes | - | UserPreferenceOut | - | Get Current User Preferences |
+| PUT | `/user/me/preferences` | yes | UserPreferenceUpdate | UserPreferenceOut | - | Update Current User Preferences |
 | POST | `/user/logout` | no | RefreshRequest | - | - | Logout |
-| GET | `/user/{user_id}` | no | - | UserOut | user_id(path) | Get User |
-| PUT | `/user/{user_id}` | no | UserUpdate | UserOut | user_id(path) | Update User |
-| DELETE | `/user/{user_id}` | no | - | - | user_id(path) | Delete User |
+| GET | `/user/{user_id}` | yes | - | UserOut | user_id(path) | Get User |
+| PUT | `/user/{user_id}` | yes | UserUpdate | UserOut | user_id(path) | Update User |
+| DELETE | `/user/{user_id}` | yes | - | - | user_id(path) | Delete User |
 
 ### school-foods
 
 | Method | Path | Auth | Request | Response | Params | Summary |
 | --- | --- | --- | --- | --- | --- | --- |
-| POST | `/school-foods/` | no | SchoolFoodCreate | SchoolFood | - | Create School Food |
-| GET | `/school-foods/` | no | - | SchoolFood[] | type(query) | List School Foods |
-| GET | `/school-foods/today` | no | - | SchoolFood[] | - | List Today School Foods |
+| POST | `/school-foods/` | yes | SchoolFoodCreate | SchoolFood | - | Create School Food |
+| GET | `/school-foods/` | yes | - | SchoolFood[] | type(query) | List School Foods |
+| GET | `/school-foods/today` | no | - | SchoolFoodToday | - | List Today School Foods |
 | GET | `/school-foods/feed-status` | yes | - | SchoolFoodFeedStatus | - | Get School Food Feed Status |
 | POST | `/school-foods/feed` | yes | SchoolFoodFeedRequest | SchoolFoodFeedResult | - | Feed School Food |
-| GET | `/school-foods/{school_food_id}` | no | - | SchoolFood | school_food_id(path) | Get School Food |
-| PUT | `/school-foods/{school_food_id}` | no | SchoolFoodUpdate | SchoolFood | school_food_id(path) | Update School Food |
-| DELETE | `/school-foods/{school_food_id}` | no | - | - | school_food_id(path) | Delete School Food |
+| GET | `/school-foods/{school_food_id}` | yes | - | SchoolFood | school_food_id(path) | Get School Food |
+| PUT | `/school-foods/{school_food_id}` | yes | SchoolFoodUpdate | SchoolFood | school_food_id(path) | Update School Food |
+| DELETE | `/school-foods/{school_food_id}` | yes | - | - | school_food_id(path) | Delete School Food |
 
 ### quizzes
 
 | Method | Path | Auth | Request | Response | Params | Summary |
 | --- | --- | --- | --- | --- | --- | --- |
-| GET | `/quizzes/` | no | - | Quiz[] | - | List Quizzes |
-| POST | `/quizzes/` | no | QuizCreate | Quiz | - | Create Quiz |
+| GET | `/quizzes/` | yes | - | Quiz[] | - | List Quizzes |
+| POST | `/quizzes/` | yes | QuizCreate | Quiz | - | Create Quiz |
 | GET | `/quizzes/available` | yes | - | QuizQuestion[] | - | List Available Quizzes |
 | GET | `/quizzes/next` | yes | - | QuizQuestion | - | Get Next Quiz |
 | GET | `/quizzes/play-status` | yes | - | QuizPlayStatus | - | Read Quiz Play Status |
 | POST | `/quizzes/submit` | yes | QuizSubmit | QuizSubmitResult | - | Submit Quiz |
-| GET | `/quizzes/{quiz_id}` | no | - | Quiz | quiz_id(path) | Get Quiz |
-| PUT | `/quizzes/{quiz_id}` | no | QuizUpdate | Quiz | quiz_id(path) | Update Quiz |
-| DELETE | `/quizzes/{quiz_id}` | no | - | - | quiz_id(path) | Delete Quiz |
+| GET | `/quizzes/{quiz_id}` | yes | - | Quiz | quiz_id(path) | Get Quiz |
+| PUT | `/quizzes/{quiz_id}` | yes | QuizUpdate | Quiz | quiz_id(path) | Update Quiz |
+| DELETE | `/quizzes/{quiz_id}` | yes | - | - | quiz_id(path) | Delete Quiz |
+
+### characters
+
+| Method | Path | Auth | Request | Response | Params | Summary |
+| --- | --- | --- | --- | --- | --- | --- |
+| GET | `/characters/me` | yes | - | CharacterMeOut | - | Get My Character |
+| PUT | `/characters/me` | yes | CharacterMeUpdate | CharacterMeOut | - | Update My Character |
+| POST | `/characters/me/xp` | yes | CharacterXpRequest | CharacterXpResult | - | Add My Character Xp |
+| POST | `/characters/me/evolve/confirm` | yes | - | CharacterMeOut | - | Confirm My Character Evolution |
+| GET | `/characters/me/meal-health` | yes | - | CharacterMealHealth | - | Get My Character Meal Health |
+| POST | `/characters/me/meal-penalty/apply` | yes | - | CharacterMealPenaltyResult | - | Apply My Character Meal Penalty |
+| GET | `/characters/` | yes | - | Character[] | - | List Characters |
+| POST | `/characters/` | yes | CharacterCreate | Character | - | Create Character |
+| GET | `/characters/{character_id}` | yes | - | Character | character_id(path) | Get Character |
+| PUT | `/characters/{character_id}` | yes | CharacterUpdate | Character | character_id(path) | Update Character |
+| DELETE | `/characters/{character_id}` | yes | - | - | character_id(path) | Delete Character |
 
 ### friends
 
@@ -167,6 +255,11 @@
 | GET | `/friends/` | yes | - | FriendOut[] | - | List Friends |
 | POST | `/friends/` | yes | FriendCreate | FriendOut | - | Add Friend |
 | GET | `/friends/search/{student_id}` | yes | - | FriendUser | student_id(path) | Search Friend By Student Id |
+| GET | `/friends/requests` | yes | - | FriendRequestOut[] | - | List Friend Requests |
+| POST | `/friends/requests` | yes | FriendRequestCreate | FriendRequestOut | - | Create Friend Request |
+| POST | `/friends/requests/{request_id}/accept` | yes | - | FriendRequestOut | request_id(path) | Accept Friend Request |
+| DELETE | `/friends/requests/{request_id}` | yes | - | - | request_id(path) | Delete Friend Request |
+| GET | `/friends/{friend_id}` | yes | - | FriendDetail | friend_id(path) | Get Friend Detail |
 | DELETE | `/friends/{friend_id}` | yes | - | - | friend_id(path) | Delete Friend |
 
 ### economy
@@ -174,6 +267,8 @@
 | Method | Path | Auth | Request | Response | Params | Summary |
 | --- | --- | --- | --- | --- | --- | --- |
 | GET | `/economy/status` | yes | - | EconomyStatus | - | Get Economy Status |
+| POST | `/economy/minigame/start` | yes | MiniGameStartRequest | MiniGameStartResult | - | Start Minigame |
+| POST | `/economy/minigame/reward` | yes | MiniGameRewardRequest | MiniGameRewardResult | - | Reward Minigame |
 | POST | `/economy/minigame/play` | yes | - | MiniGamePlayResult | - | Play Minigame |
 
 ### minigames
@@ -183,13 +278,15 @@
 | POST | `/minigames/results` | yes | MiniGameResultCreate | MiniGameResultOut | - | Create Minigame Result |
 | GET | `/minigames/results/me` | yes | - | MiniGameResultOut[] | - | List My Minigame Results |
 | GET | `/minigames/ranking/me` | yes | - | MiniGameRankingMe | - | Get My Minigame Ranking |
+| GET | `/minigames/rankings` | yes | - | MiniGameRankingList | game_type, mode, limit(query) | List Minigame Rankings |
+| GET | `/minigames/rankings/friends` | yes | - | MiniGameRankingList | game_type, mode, limit(query) | List Friend Minigame Rankings |
 
 ### shop
 
 | Method | Path | Auth | Request | Response | Params | Summary |
 | --- | --- | --- | --- | --- | --- | --- |
 | GET | `/shop/item-types` | no | - | ShopItemTypeOut[] | - | List Shop Item Types |
-| POST | `/shop/items` | no | RoomItemCreate | RoomItemOut | - | Create Room Item |
+| POST | `/shop/items` | yes | RoomItemCreate | RoomItemOut | - | Create Room Item |
 | GET | `/shop/items` | yes | - | ShopItemOut[] | item_type(query) | List Shop Items |
 | POST | `/shop/items/{item_id}/purchase` | yes | - | RoomItemPurchaseResult | item_id(path) | Purchase Room Item |
 
@@ -199,19 +296,12 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | GET | `/rooms/me` | yes | - | RoomView | - | Get My Room |
 | PUT | `/rooms/me/equip` | yes | RoomEquipRequest | RoomView | - | Equip Room Item |
+| DELETE | `/rooms/me/equip/{slot}` | yes | - | RoomView | slot(path) | Unequip Room Item |
 | GET | `/rooms/{user_id}` | yes | - | RoomView | user_id(path) | Get Room |
-| GET | `/rooms/{user_id}/guestbook` | yes | - | GuestbookOut[] | user_id(path) | List Guestbook Entries |
+| GET | `/rooms/{user_id}/guestbook` | yes | - | GuestbookPage | user_id(path), cursor, limit(query) | List Guestbook Entries |
 | POST | `/rooms/{user_id}/guestbook` | yes | GuestbookCreate | GuestbookOut | user_id(path) | Create Guestbook Entry |
-
-### characters
-
-| Method | Path | Auth | Request | Response | Params | Summary |
-| --- | --- | --- | --- | --- | --- | --- |
-| GET | `/characters/` | no | - | Character[] | - | List Characters |
-| POST | `/characters/` | no | CharacterCreate | Character | - | Create Character |
-| GET | `/characters/{character_id}` | no | - | Character | character_id(path) | Get Character |
-| PUT | `/characters/{character_id}` | no | CharacterUpdate | Character | character_id(path) | Update Character |
-| DELETE | `/characters/{character_id}` | no | - | - | character_id(path) | Delete Character |
+| PUT | `/rooms/guestbook/{entry_id}` | yes | GuestbookUpdate | GuestbookOut | entry_id(path) | Update Guestbook Entry |
+| DELETE | `/rooms/guestbook/{entry_id}` | yes | - | - | entry_id(path) | Delete Guestbook Entry |
 
 ### user-quiz-connect
 
@@ -221,6 +311,21 @@
 | POST | `/user-quiz-connect/` | no | UserQuizConnectCreate | UserQuizConnect | - | Create User Quiz Connect |
 | GET | `/user-quiz-connect/{user_quiz_id}` | no | - | UserQuizConnect | user_quiz_id(path) | Get User Quiz Connect |
 | DELETE | `/user-quiz-connect/{user_quiz_id}` | no | - | - | user_quiz_id(path) | Delete User Quiz Connect |
+
+### app
+
+| Method | Path | Auth | Request | Response | Params | Summary |
+| --- | --- | --- | --- | --- | --- | --- |
+| GET | `/app/config` | no | - | AppConfig | - | Get App Config |
+| GET | `/app/bootstrap` | yes | - | AppBootstrap | - | Get App Bootstrap |
+
+### achievements
+
+| Method | Path | Auth | Request | Response | Params | Summary |
+| --- | --- | --- | --- | --- | --- | --- |
+| GET | `/achievements/` | no | - | AchievementMaster[] | - | List Achievements |
+| GET | `/achievements/me` | yes | - | AchievementProgress[] | - | List My Achievements |
+| POST | `/achievements/events` | yes | AchievementEventRequest | AchievementEventResult | - | Create Achievement Event |
 
 ### misc
 
@@ -262,6 +367,7 @@ Required: `access_token`, `token_type`, `refresh_token`
 | `access_token` | string |
 | `token_type` | string |
 | `refresh_token` | string |
+| `unlocked_achievements` | UnlockedAchievement[] | null |
 
 ### UserOut
 
@@ -282,6 +388,7 @@ Required: `email`, `student_id`, `nickname`, `name`, `user_id`, `xp_point`, `coi
 | `email_verified` | boolean |
 | `email_verified_at` | string | null |
 | `created_at` | string | null |
+| `is_admin` | boolean | null |
 
 ### SchoolFood
 
@@ -295,6 +402,16 @@ Required: `name`, `school_food_id`
 | `type` | string | null |
 | `school_food_id` | integer |
 
+### SchoolFoodToday
+
+Required: `date`, `server_time`, `sections`
+
+| Field | Type |
+| --- | --- |
+| `date` | string |
+| `server_time` | string |
+| `sections` | SchoolFoodSection[] |
+
 ### SchoolFoodFeedStatus
 
 Required: `date`, `fed_slots`, `can_feed_now`
@@ -305,6 +422,8 @@ Required: `date`, `fed_slots`, `can_feed_now`
 | `current_slot` | string | null |
 | `fed_slots` | string[] |
 | `can_feed_now` | boolean |
+| `next_slot_at` | string | null |
+| `server_time` | string | null |
 
 ### SchoolFoodFeedRequest
 
@@ -329,6 +448,7 @@ Required: `detail`, `feed_id`, `school_food_id`, `meal_slot`, `awarded_xp`, `spe
 | `xp_point` | integer |
 | `coin` | integer |
 | `fed_at` | string |
+| `unlocked_achievements` | UnlockedAchievement[] | null |
 
 ### QuizQuestion
 
@@ -363,6 +483,7 @@ Required: `detail`, `correct`, `awarded_points`, `awarded_coin`, `xp_point`, `co
 | `xp_point` | integer |
 | `coin` | integer |
 | `correct_answer` | string |
+| `unlocked_achievements` | UnlockedAchievement[] | null |
 
 ### QuizPlayStatus
 
@@ -378,6 +499,7 @@ Required: `date`, `solved_today`, `daily_limit`, `remaining_today`, `cooldown_ho
 | `last_played_at` | string | null |
 | `next_available_at` | string | null |
 | `can_play_now` | boolean |
+| `blocked_reason` | string | null |
 
 ### FriendCreate
 
@@ -417,6 +539,9 @@ Required: `coin`, `heart`, `max_heart`
 | `coin` | integer |
 | `heart` | integer |
 | `max_heart` | integer |
+| `heart_updated_at` | string | null |
+| `next_heart_at` | string | null |
+| `server_time` | string | null |
 
 ### MiniGamePlayResult
 
@@ -430,6 +555,9 @@ Required: `detail`, `awarded_coin`, `spent_heart`, `coin`, `heart`, `max_heart`
 | `coin` | integer |
 | `heart` | integer |
 | `max_heart` | integer |
+| `heart_updated_at` | string | null |
+| `next_heart_at` | string | null |
+| `unlocked_achievements` | UnlockedAchievement[] | null |
 
 ### MiniGameResultCreate
 
@@ -440,8 +568,11 @@ Required: `score`
 | `score` | integer |
 | `success` | boolean | null |
 | `game_type` | string | null |
+| `mode` | string | null |
 | `location` | string | null |
+| `play_session_id` | string | null |
 | `play_time_seconds` | integer | null |
+| `ended_reason` | string | null |
 
 ### MiniGameResultOut
 
@@ -452,11 +583,50 @@ Required: `result_id`, `user_id`, `score`, `success`, `created_at`
 | `result_id` | integer |
 | `user_id` | integer |
 | `game_type` | string | null |
+| `mode` | string | null |
 | `location` | string | null |
+| `play_session_id` | string | null |
 | `score` | integer |
 | `success` | boolean |
 | `play_time_seconds` | integer | null |
+| `ended_reason` | string | null |
 | `created_at` | string |
+| `unlocked_achievements` | UnlockedAchievement[] | null |
+
+### MiniGameStartResult
+
+Required: `play_session_id`, `spent_heart`, `heart`, `max_heart`
+
+| Field | Type |
+| --- | --- |
+| `play_session_id` | string |
+| `spent_heart` | integer |
+| `heart` | integer |
+| `max_heart` | integer |
+| `heart_updated_at` | string | null |
+| `next_heart_at` | string | null |
+| `unlocked_achievements` | UnlockedAchievement[] | null |
+
+### MiniGameRewardResult
+
+Required: `awarded_coin`, `coin`
+
+| Field | Type |
+| --- | --- |
+| `awarded_coin` | integer |
+| `coin` | integer |
+| `unlocked_achievements` | UnlockedAchievement[] | null |
+
+### MiniGameRankingList
+
+Required: `rankings`, `total_ranked_users`
+
+| Field | Type |
+| --- | --- |
+| `game_type` | string | null |
+| `mode` | string | null |
+| `rankings` | MiniGameRankingUser[] |
+| `total_ranked_users` | integer |
 
 ### MiniGameRankingMe
 
@@ -480,6 +650,7 @@ Required: `name`, `item_type`, `item_id`, `created_at`, `owned`, `equipped`
 | `image` | string | null |
 | `price` | integer |
 | `is_default` | boolean | null |
+| `item_key` | string | null |
 | `item_id` | integer |
 | `created_at` | string |
 | `owned` | boolean |
@@ -501,8 +672,11 @@ Required: `owner`, `equipped_items`
 
 | Field | Type |
 | --- | --- |
-| `owner` | FriendUser |
+| `owner` | RoomOwnerOut |
+| `character` | RoomCharacterOut | null |
+| `wallpaper` | ShopItemOut | null |
 | `equipped_items` | RoomEquippedItemOut[] |
+| `unlocked_achievements` | UnlockedAchievement[] | null |
 
 ### RoomEquipRequest
 
@@ -532,6 +706,44 @@ Required: `entry_id`, `room_owner_id`, `writer_id`, `writer_nickname`, `content`
 | `writer_nickname` | string |
 | `content` | string |
 | `created_at` | string |
+
+### GuestbookPage
+
+Required: `items`
+
+| Field | Type |
+| --- | --- |
+| `items` | GuestbookOut[] |
+| `next_cursor` | string | null |
+
+### AchievementProgress
+
+Required: `achievement_key`, `title`, `condition_type`, `target_value`, `progress_value`, `completed`, `claimed`
+
+| Field | Type |
+| --- | --- |
+| `achievement_key` | string |
+| `title` | string |
+| `condition_type` | string |
+| `target_value` | integer |
+| `progress_value` | integer |
+| `completed` | boolean |
+| `claimed` | boolean |
+| `completed_at` | string | null |
+| `reward_type` | string |
+| `reward_value` | integer | null |
+| `reward_item_key` | string | null |
+
+### AchievementEventResult
+
+Required: `event_type`, `coin`, `xp_point`, `unlocked_achievements`
+
+| Field | Type |
+| --- | --- |
+| `event_type` | string |
+| `coin` | integer |
+| `xp_point` | integer |
+| `unlocked_achievements` | UnlockedAchievement[] |
 
 ### Character
 
@@ -565,8 +777,13 @@ Required: -
 
 ## Notes
 
-- Several admin-like CRUD endpoints are public in the current spec. App integration should prefer authenticated user-scoped endpoints where available.
-- `POST /economy/minigame/play` has no request body in the spec. Verify behavior with the backend before wiring gameplay flow.
-- `/minigames/ranking/me` has no game type query parameter in the spec. If rankings must be per game/mode, backend clarification is needed.
+- Several admin-like CRUD endpoints now require auth in the current spec. App integration should prefer authenticated user-scoped endpoints where available.
+- `/user/me/image` exists in the OpenAPI, but profile image editing was removed from the current settings UI. Keep the endpoint for backend compatibility unless product policy says to remove it from the API too.
+- `POST /economy/minigame/play` still has no request body in the spec. Prefer the newer `/economy/minigame/start` and `/economy/minigame/reward` flow for new gameplay wiring.
+- `/minigames/ranking/me` still has no game type query parameter in the spec. Use `/minigames/rankings` or `/minigames/rankings/friends` for game/mode-specific ranking lists.
+- `CharacterMeOut`, `CharacterMeUpdate`, `AppBootstrap.character`, `RoomCharacterOut`에는 아직 `equipped_skin_key`가 없습니다. 코스튬 장착 상태를 기기 간 동기화하거나 친구 방에서 표시하려면 백엔드 명세 추가가 필요합니다.
+- 졸업 화면에 표시하는 누적 학식/퀴즈/미니게임 통계는 현재 로컬 통계입니다. 서버 기준 졸업 리포트를 원하면 통계 요약 API 또는 bootstrap field가 필요합니다.
+- 게스트 모드는 서버와 동기화하지 않는 로컬 전용 상태입니다. 게스트에서 친구/방명록/친구 랭킹 API를 호출하지 않도록 프론트에서 차단합니다.
+- 개발자 패널의 XP/학년/코인 강제 조작은 현재 서버 admin/debug 계약이 없어 서버에 반영하지 않습니다.
 - Server field names use snake_case; frontend state currently uses camelCase. Add mapper functions instead of leaking snake_case into UI/store code.
 - README의 학식 시간대와 기존 프론트 상수의 시간대가 다를 수 있습니다. 서버 연동 시 `GET /school-foods/feed-status` 응답을 기준으로 UI 상태를 맞추는 편이 안전합니다.

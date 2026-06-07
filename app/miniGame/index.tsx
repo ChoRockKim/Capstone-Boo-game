@@ -11,6 +11,7 @@ import user from "@/assets/icons/users-multiple.svg";
 import CoinBox from "@/components/CoinBox/CoinBox";
 import FriendList from "@/components/FriendList/FriendList";
 import FriendPanel from "@/components/FriendPanel/FriendPanel";
+import GuestModeUnavailableModal from "@/components/GuestModeUnavailableModal/GuestModeUnavailableModal";
 import LoadingOverlay from "@/components/LoadingOverlay/LoadingOverlay";
 import MainButton from "@/components/MainButton/MainButton";
 import {
@@ -73,6 +74,7 @@ export default function MiniGameIndex() {
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isFriendOpen, setIsFriendOpen] = useState(false);
   const [isFriendListOpen, setIsFriendListOpen] = useState(false);
+  const [isGuestFriendModalOpen, setIsGuestFriendModalOpen] = useState(false);
   const [isSoundSettingsOpen, setIsSoundSettingsOpen] = useState(false);
   const [isPlaceInfoOpen, setIsPlaceInfoOpen] = useState(false);
   const [isMiniGameTutorialOpen, setIsMiniGameTutorialOpen] = useState(false);
@@ -94,6 +96,7 @@ export default function MiniGameIndex() {
   const hasSeenMiniGameTutorial = useGameStore(
     (state) => state.hasSeenMiniGameTutorial,
   );
+  const isGuestMode = useGameStore((state) => state.isGuestMode);
   const setHasSeenMiniGameTutorial = useGameStore(
     (state) => state.setHasSeenMiniGameTutorial,
   );
@@ -204,6 +207,13 @@ export default function MiniGameIndex() {
   const handleFriendButtonPress = () => {
     setIsOptionOpen(false);
     closeSubPanels();
+
+    if (isGuestMode) {
+      setIsFriendOpen(false);
+      setIsGuestFriendModalOpen(true);
+      return;
+    }
+
     setIsFriendOpen((prev) => !prev);
   };
 
@@ -398,11 +408,23 @@ export default function MiniGameIndex() {
       ) : null}
       {isProfileOpen ? (
         <MyProfile
+          onActionAlert={(title, message, options) =>
+            showTopAlert(title, message ?? "", {
+              autoHideDuration: options?.autoHideDuration,
+              textSize: options?.textSize,
+            })
+          }
           setIsOptionOpen={setIsOptionOpen}
           setIsProfileOpen={setIsProfileOpen}
         />
       ) : null}
       {isFriendOpen ? <FriendPanel setIsFriendOpen={setIsFriendOpen} /> : null}
+      {isGuestFriendModalOpen ? (
+        <GuestModeUnavailableModal
+          featureName="친구"
+          onClose={() => setIsGuestFriendModalOpen(false)}
+        />
+      ) : null}
       {isFriendListOpen ? (
         <FriendList
           setIsFriendListOpen={setIsFriendListOpen}

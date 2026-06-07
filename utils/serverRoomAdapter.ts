@@ -26,24 +26,45 @@ export type LocalRoomStateFromServer = {
 };
 
 const ROOM_SLOT_IDS: RoomSlotId[] = ["bed", "closet", "table"];
+const SERVER_ROOM_ITEM_TYPE_ALIASES: Record<string, RoomSlotId | "wallpaper"> = {
+  desk: "table",
+  room: "wallpaper",
+  table: "table",
+  wallpaper: "wallpaper",
+};
 
 export const normalizeServerRoomItemKey = (value: string) =>
   value.toLowerCase().replace(/[\s_-]/g, "");
 
-const getServerItemType = (serverItem: Pick<ShopItemOut, "item_type">) => {
-  if (serverItem.item_type === "wallpaper") {
-    return "wallpaper" as const;
+export const normalizeServerRoomItemType = (
+  itemType: string | null | undefined,
+) => {
+  if (!itemType) {
+    return null;
   }
 
-  return ROOM_SLOT_IDS.includes(serverItem.item_type as RoomSlotId)
-    ? (serverItem.item_type as RoomSlotId)
+  const normalizedItemType = itemType.toLowerCase().trim();
+  const aliasedItemType = SERVER_ROOM_ITEM_TYPE_ALIASES[normalizedItemType];
+
+  if (aliasedItemType) {
+    return aliasedItemType;
+  }
+
+  return ROOM_SLOT_IDS.includes(normalizedItemType as RoomSlotId)
+    ? (normalizedItemType as RoomSlotId)
     : null;
 };
 
+const getServerItemType = (serverItem: Pick<ShopItemOut, "item_type">) =>
+  normalizeServerRoomItemType(serverItem.item_type);
+
 export const getLocalRoomItemIdFromServerItem = (
-  serverItem: Pick<ShopItemOut, "image" | "name">,
+  serverItem: Pick<ShopItemOut, "image" | "item_key" | "name">,
   slotId: RoomSlotId,
 ): RoomItemId | null => {
+  const serverItemKey = serverItem.item_key
+    ? normalizeServerRoomItemKey(serverItem.item_key)
+    : "";
   const serverNameKey = normalizeServerRoomItemKey(serverItem.name);
   const serverImageKey = serverItem.image
     ? normalizeServerRoomItemKey(serverItem.image)
@@ -59,6 +80,8 @@ export const getLocalRoomItemIdFromServerItem = (
       const labelKey = normalizeServerRoomItemKey(item.label);
 
       return (
+        serverItemKey === itemIdKey ||
+        serverItemKey === labelKey ||
         serverNameKey === itemIdKey ||
         serverNameKey === labelKey ||
         serverImageKey.includes(itemIdKey)
@@ -70,8 +93,11 @@ export const getLocalRoomItemIdFromServerItem = (
 };
 
 export const getLocalWallpaperIdFromServerItem = (
-  serverItem: Pick<ShopItemOut, "image" | "name">,
+  serverItem: Pick<ShopItemOut, "image" | "item_key" | "name">,
 ): RoomWallpaperId | null => {
+  const serverItemKey = serverItem.item_key
+    ? normalizeServerRoomItemKey(serverItem.item_key)
+    : "";
   const serverNameKey = normalizeServerRoomItemKey(serverItem.name);
   const serverImageKey = serverItem.image
     ? normalizeServerRoomItemKey(serverItem.image)
@@ -83,6 +109,8 @@ export const getLocalWallpaperIdFromServerItem = (
       const labelKey = normalizeServerRoomItemKey(wallpaper.label);
 
       return (
+        serverItemKey === wallpaperIdKey ||
+        serverItemKey === labelKey ||
         serverNameKey === wallpaperIdKey ||
         serverNameKey === labelKey ||
         serverImageKey.includes(wallpaperIdKey)
@@ -115,16 +143,20 @@ export const getServerShopItemForLocalRoomOption = ({
 
   return (
     serverShopItems.find((item) => {
-      if (item.item_type !== type) {
+      if (normalizeServerRoomItemType(item.item_type) !== type) {
         return false;
       }
 
+      const itemKey = item.item_key
+        ? normalizeServerRoomItemKey(item.item_key)
+        : "";
       const itemNameKey = normalizeServerRoomItemKey(item.name);
       const itemImageKey = item.image
         ? normalizeServerRoomItemKey(item.image)
         : "";
 
       return (
+        optionKeys.has(itemKey) ||
         optionKeys.has(itemNameKey) ||
         Array.from(optionKeys).some((key) => itemImageKey.includes(key))
       );
@@ -139,7 +171,10 @@ export const mapServerRoomViewToLocalRoomState = (
   "equippedRoomItems" | "equippedRoomWallpaper"
 > => {
   const equippedRoomItems = { ...DEFAULT_EQUIPPED_ROOM_ITEMS };
-  let equippedRoomWallpaper = DEFAULT_EQUIPPED_ROOM_WALLPAPER;
+  let equippedRoomWallpaper = roomView.wallpaper
+    ? (getLocalWallpaperIdFromServerItem(roomView.wallpaper) ??
+      DEFAULT_EQUIPPED_ROOM_WALLPAPER)
+    : DEFAULT_EQUIPPED_ROOM_WALLPAPER;
 
   roomView.equipped_items.forEach((equippedItem) => {
     const itemType = getServerItemType(equippedItem);

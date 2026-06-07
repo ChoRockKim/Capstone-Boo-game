@@ -37,6 +37,7 @@ const FriendList = ({
 }: FriendListProps) => {
   const accessToken = useGameStore((state) => state.accessToken);
   const friendList = useGameStore((state) => state.friendList);
+  const isGuestMode = useGameStore((state) => state.isGuestMode);
   const removeFriend = useGameStore((state) => state.removeFriend);
   const queryClient = useQueryClient();
   const [deleteErrorMessage, setDeleteErrorMessage] = useState("");
@@ -55,8 +56,10 @@ const FriendList = ({
     () =>
       accessToken
         ? (serverFriends?.map(mapFriendOutToFriendListItem) ?? [])
-        : friendList,
-    [accessToken, friendList, serverFriends],
+        : isGuestMode
+          ? []
+          : friendList,
+    [accessToken, friendList, isGuestMode, serverFriends],
   );
   const clampedVisibleCount = Math.min(
     visibleCount,
@@ -143,6 +146,16 @@ const FriendList = ({
         return;
       }
 
+      return;
+    }
+
+    if (accessToken && targetFriend?.serverFriendId === undefined) {
+      setDeleteErrorMessage("서버 친구 정보를 불러온 뒤 다시 시도해주세요.");
+      setDeleteModalState({
+        friendId: deleteModalState.friendId,
+        friendName: deleteModalState.friendName,
+        mode: "confirm",
+      });
       return;
     }
 

@@ -25,9 +25,11 @@ import CoinBox from "@/components/CoinBox/CoinBox";
 import DeveloperPanel from "@/components/DeveloperPanel/DeveloperPanel";
 import EvolutionOverlay, {
   EVOLUTION_BLINK_DURATION_MS,
+  GraduationOverlay,
 } from "@/components/EvolutionOverlay/EvolutionOverlay";
 import FriendList from "@/components/FriendList/FriendList";
 import FriendPanel from "@/components/FriendPanel/FriendPanel";
+import GuestModeUnavailableModal from "@/components/GuestModeUnavailableModal/GuestModeUnavailableModal";
 import LoadingOverlay from "@/components/LoadingOverlay/LoadingOverlay";
 import {
   LOADING_OVERLAY_BACKGROUND_IMAGE,
@@ -64,7 +66,12 @@ import {
   TUTORIAL_IMAGE_ASSETS,
 } from "@/components/TutorialPanel/TutorialData";
 import TutorialPanel from "@/components/TutorialPanel/TutorialPanel";
-import { CHARACTER_IMAGES, type CharacterState } from "@/constants/character";
+import {
+  getAllCharacterImageAssets,
+  getCharacterImage,
+  type CharacterCostumeKey,
+  type CharacterState,
+} from "@/constants/character";
 import { colors } from "@/constants/colors";
 import { fonts } from "@/constants/fonts";
 import type { PendingEvolution } from "@/stores/useGameStore";
@@ -76,6 +83,7 @@ import {
   pauseBackgroundMusicForOverlay,
   resumeBackgroundMusicAfterOverlay,
   startBackgroundMusicSession,
+  startTemporaryBackgroundMusic,
 } from "@/utils/backgroundMusic";
 import {
   getTodayMealTalkMessage,
@@ -87,6 +95,7 @@ import {
   type PreloadableImageAsset,
 } from "@/utils/preloadImageAssets";
 import {
+  confirmMyCharacterEvolution,
   getQuizPlayStatus,
   getSchoolFoodFeedStatus,
 } from "@/utils/serverApi";
@@ -129,10 +138,9 @@ const EVOLUTION_POST_SUCCESS_SETTLE_MS = Math.max(
 );
 const GAME_DEFERRED_IMAGE_ASSETS = [
   require("../../assets/images/big-smoke.png"),
-  ...Object.values(CHARACTER_IMAGES.grades).flatMap((gradeImages) =>
-    Object.values(gradeImages),
-  ),
-  CHARACTER_IMAGES.graduate,
+  require("../../assets/images/graduate-background.png"),
+  require("../../assets/characters/graduated-boo.png"),
+  ...getAllCharacterImageAssets(),
   ...PLATE_IMAGE_ASSETS,
   ...ROOM_IMAGE_ASSETS,
   ...TUTORIAL_IMAGE_ASSETS,
@@ -144,19 +152,18 @@ let hasPreloadedGameDeferredImageAssets = false;
 let gameDeferredImageAssetsPreloadPromise: Promise<void> | null = null;
 
 const getGameCriticalImageAssets = (
-  grade: keyof typeof CHARACTER_IMAGES.grades,
+  grade: 1 | 2 | 3 | 4,
   characterState: CharacterState,
-) => {
-  const gradeImages = CHARACTER_IMAGES.grades[grade];
-
-  return [
-    gradeImages[characterState] ?? gradeImages.basic1,
+  characterCostumeKey: CharacterCostumeKey,
+) =>
+  [
+    getCharacterImage(grade, characterState, characterCostumeKey),
   ] as PreloadableImageAsset[];
-};
 
 const preloadGameCriticalImageAssets = (
-  grade: keyof typeof CHARACTER_IMAGES.grades,
+  grade: 1 | 2 | 3 | 4,
   characterState: CharacterState,
+  characterCostumeKey: CharacterCostumeKey,
 ) => {
   if (hasPreloadedGameCriticalImageAssets) {
     return Promise.resolve();
@@ -164,7 +171,7 @@ const preloadGameCriticalImageAssets = (
 
   if (!gameCriticalImageAssetsPreloadPromise) {
     gameCriticalImageAssetsPreloadPromise = preloadImageAssets(
-      getGameCriticalImageAssets(grade, characterState),
+      getGameCriticalImageAssets(grade, characterState, characterCostumeKey),
     )
       .catch(() => undefined)
       .then(() => {
@@ -236,6 +243,7 @@ export default function Index() {
   const evolutionSequenceTimersRef = useRef<ReturnType<typeof setTimeout>[]>(
     [],
   );
+  const graduationMusicCleanupRef = useRef<(() => void) | null>(null);
   const hasShownMealBooChatRef = useRef(false);
   const hasShownWeekendBooChatRef = useRef(false);
   const isBooChatVisibleRef = useRef(false);
@@ -251,12 +259,15 @@ export default function Index() {
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isFriendOpen, setIsFriendOpen] = useState(false);
   const [isFriendListOpen, setIsFriendListOpen] = useState(false);
+  const [isGuestFriendModalOpen, setIsGuestFriendModalOpen] = useState(false);
   const [isSoundSettingsOpen, setIsSoundSettingsOpen] = useState(false);
   const [isMealOpen, setIsMealOpen] = useState(false);
   const [isQuizOpen, setIsQuizOpen] = useState(false);
   const [isTutorialOpen, setIsTutorialOpen] = useState(false);
   const [isAchievementOpen, setIsAchievementOpen] = useState(false);
   const [isDeveloperPanelOpen, setIsDeveloperPanelOpen] = useState(false);
+  const [isGraduationOpen, setIsGraduationOpen] = useState(false);
+  const [isGraduationPreview, setIsGraduationPreview] = useState(false);
   const [isMiniGameLoading, setIsMiniGameLoading] = useState(false);
   const [isBackgroundReady, setIsBackgroundReady] = useState(
     hasPreloadedGameCriticalImageAssets,
@@ -289,7 +300,11 @@ export default function Index() {
   });
   const { todayMealSections } = useTodayMeal();
   const accessToken = useGameStore((state) => state.accessToken);
+  const achievementStats = useGameStore((state) => state.achievementStats);
   const booName = useGameStore((state) => state.booName);
+  const characterCostumeKey = useGameStore(
+    (state) => state.characterCostumeKey,
+  );
   const characterState = useGameStore((state) => state.characterState);
   const clearPendingEvolution = useGameStore(
     (state) => state.clearPendingEvolution,
@@ -301,6 +316,7 @@ export default function Index() {
   const hasSeenGameTutorial = useGameStore(
     (state) => state.hasSeenGameTutorial,
   );
+  const isGuestMode = useGameStore((state) => state.isGuestMode);
   const lastFedMeals = useGameStore((state) => state.lastFedMeals);
   const mealRestrictionEnabled = useGameStore(
     (state) => state.mealRestrictionEnabled,
@@ -314,12 +330,14 @@ export default function Index() {
   const quizDailyLimitEnabled = useGameStore(
     (state) => state.quizDailyLimitEnabled,
   );
+  const resetGameState = useGameStore((state) => state.resetGameState);
   const setCharacterState = useGameStore((state) => state.setCharacterState);
   const setHasSeenGameTutorial = useGameStore(
     (state) => state.setHasSeenGameTutorial,
   );
   const syncMealStatus = useGameStore((state) => state.syncMealStatus);
   const totalXp = useGameStore((state) => state.totalXp);
+  const userCreatedAt = useGameStore((state) => state.userCreatedAt);
   const bottomButtonOffset = Math.max(insets.bottom + 24, 46);
   const progressBarBottomOffset =
     bottomButtonOffset + BIG_BUTTON_HEIGHT + PROGRESS_BAR_GAP;
@@ -340,8 +358,9 @@ export default function Index() {
     ? getRequiredXpForGrade(evolutionDisplaySource.fromGrade)
     : xpProgress.progressMaxXp;
   const isEvolutionSequenceActive =
-    !!activeEvolution && evolutionPhase !== null;
+    isGraduationOpen || (!!activeEvolution && evolutionPhase !== null);
   const isEvolutionBusy =
+    isGraduationOpen ||
     !!activeEvolution ||
     (!!pendingEvolution && pendingEvolution.trigger !== "quiz");
   const localMealAvailability = useMemo(
@@ -505,7 +524,11 @@ export default function Index() {
     const preloadGameAssets = async () => {
       await Promise.all([
         preloadLoadingOverlayAssets(),
-        preloadGameCriticalImageAssets(displayedGrade, characterState),
+        preloadGameCriticalImageAssets(
+          displayedGrade,
+          characterState,
+          characterCostumeKey,
+        ),
       ]);
 
       if (isMounted) {
@@ -520,7 +543,7 @@ export default function Index() {
     return () => {
       isMounted = false;
     };
-  }, [characterState, displayedGrade]);
+  }, [characterCostumeKey, characterState, displayedGrade]);
 
   useEffect(() => {
     if (!shouldUseMinimumGameLoadingRef.current) {
@@ -596,6 +619,8 @@ export default function Index() {
         clearTimeout(timer),
       );
       evolutionSequenceTimersRef.current = [];
+      graduationMusicCleanupRef.current?.();
+      graduationMusicCleanupRef.current = null;
     };
   }, []);
 
@@ -954,6 +979,10 @@ export default function Index() {
 
   const startEvolutionSequence = useCallback(
     (evolution: PendingEvolution) => {
+      if (evolution.toLifeStage === "graduate") {
+        return;
+      }
+
       stopEvolutionAudioAndTimers();
       closeAllPanelsToMain();
       hideBooChatNow();
@@ -987,6 +1016,16 @@ export default function Index() {
       queueEvolutionTimer(() => {
         setEvolutionPhase(null);
         clearPendingEvolution();
+        const currentAccessToken = useGameStore.getState().accessToken;
+
+        if (currentAccessToken) {
+          void confirmMyCharacterEvolution(currentAccessToken).catch(
+            (error) => {
+              console.warn("서버 캐릭터 진화 확정 실패", error);
+            },
+          );
+        }
+
         showBooChat(getEvolutionBooChat(evolution.toGrade), {
           durationMs: EVOLUTION_ALERT_SUCCESS_MS,
           force: true,
@@ -1043,6 +1082,84 @@ export default function Index() {
     ],
   );
 
+  const openGraduationOverlay = useCallback(
+    (options?: { preview?: boolean }) => {
+      stopEvolutionAudioAndTimers();
+      closeAllPanelsToMain();
+      hideBooChatNow();
+      graduationMusicCleanupRef.current?.();
+      graduationMusicCleanupRef.current =
+        startTemporaryBackgroundMusic("graduation");
+      setActiveEvolution(null);
+      setEvolutionPhase(null);
+      setCharacterState("happy1");
+      setIsGraduationPreview(!!options?.preview);
+      setIsGraduationOpen(true);
+
+      if (options?.preview) {
+        return;
+      }
+
+      clearPendingEvolution();
+
+      const currentAccessToken = useGameStore.getState().accessToken;
+
+      if (currentAccessToken) {
+        void confirmMyCharacterEvolution(currentAccessToken).catch((error) => {
+          console.warn("서버 캐릭터 졸업 확정 실패", error);
+        });
+      }
+    },
+    [
+      clearPendingEvolution,
+      closeAllPanelsToMain,
+      hideBooChatNow,
+      setCharacterState,
+      stopEvolutionAudioAndTimers,
+    ],
+  );
+
+  const closeGraduationOverlay = useCallback(() => {
+    setIsGraduationOpen(false);
+    setIsGraduationPreview(false);
+    graduationMusicCleanupRef.current?.();
+    graduationMusicCleanupRef.current = null;
+  }, []);
+
+  const handleGraduationExit = useCallback(() => {
+    if (isGraduationPreview) {
+      closeGraduationOverlay();
+      showTopAlert("졸업 화면 미리보기를 닫았어요", "", {
+        autoHideDuration: 1200,
+        textSize: "compact",
+      });
+      return;
+    }
+
+    closeGraduationOverlay();
+    router.replace("/");
+  }, [closeGraduationOverlay, isGraduationPreview, showTopAlert]);
+
+  const handleGraduationRestart = useCallback(() => {
+    if (isGraduationPreview) {
+      closeGraduationOverlay();
+      showTopAlert("졸업 화면 미리보기를 닫았어요", "", {
+        autoHideDuration: 1200,
+        textSize: "compact",
+      });
+      return;
+    }
+
+    closeGraduationOverlay();
+    resetGameState();
+    router.replace("/");
+  }, [
+    closeGraduationOverlay,
+    isGraduationPreview,
+    resetGameState,
+    showTopAlert,
+  ]);
+
   useFocusEffect(
     useCallback(() => {
       const entryBooChatTimer = setTimeout(() => {
@@ -1076,7 +1193,12 @@ export default function Index() {
   useEffect(() => {
     clearEvolutionStartTimer();
 
-    if (!pendingEvolution || activeEvolution) {
+    if (!pendingEvolution || activeEvolution || isGraduationOpen) {
+      return;
+    }
+
+    if (pendingEvolution.toLifeStage === "graduate") {
+      openGraduationOverlay();
       return;
     }
 
@@ -1102,7 +1224,9 @@ export default function Index() {
     activeEvolution,
     clearEvolutionStartTimer,
     closeAllPanelsToMain,
+    isGraduationOpen,
     isQuizOpen,
+    openGraduationOverlay,
     pendingEvolution,
     startEvolutionSequence,
   ]);
@@ -1323,6 +1447,7 @@ export default function Index() {
           {!activeEvolution || evolutionPhase === null ? (
             <View style={styles.characterVisual}>
               <Character
+                costumeKey={characterCostumeKey}
                 grade={displayedGrade}
                 onImageReady={() => setIsCharacterReady(true)}
                 state={characterState}
@@ -1366,6 +1491,13 @@ export default function Index() {
                   setIsMealOpen(false);
                   setIsQuizOpen(false);
                   setIsAchievementOpen(false);
+
+                  if (isGuestMode) {
+                    setIsFriendOpen(false);
+                    setIsGuestFriendModalOpen(true);
+                    return;
+                  }
+
                   setIsFriendOpen((prev) => !prev);
                 }}
                 shadow
@@ -1527,11 +1659,23 @@ export default function Index() {
       )}
       {isProfileOpen && (
         <MyProfile
+          onActionAlert={(title, message, options) =>
+            showTopAlert(title, message ?? "", {
+              autoHideDuration: options?.autoHideDuration,
+              textSize: options?.textSize,
+            })
+          }
           setIsOptionOpen={setIsOptionOpen}
           setIsProfileOpen={setIsProfileOpen}
         />
       )}
       {isFriendOpen && <FriendPanel setIsFriendOpen={setIsFriendOpen} />}
+      {isGuestFriendModalOpen ? (
+        <GuestModeUnavailableModal
+          featureName="친구"
+          onClose={() => setIsGuestFriendModalOpen(false)}
+        />
+      ) : null}
       {isFriendListOpen && (
         <FriendList
           setIsFriendListOpen={setIsFriendListOpen}
@@ -1579,6 +1723,9 @@ export default function Index() {
               textSize: "compact",
             })
           }
+          onOpenGraduationPreview={() => {
+            openGraduationOverlay({ preview: true });
+          }}
           onMealStateChanged={() => setMealNow(new Date())}
           setIsDeveloperPanelOpen={setIsDeveloperPanelOpen}
         />
@@ -1591,6 +1738,13 @@ export default function Index() {
           }}
         />
       )}
+      <GraduationOverlay
+        achievementStats={achievementStats}
+        onExit={handleGraduationExit}
+        onRestart={handleGraduationRestart}
+        userCreatedAt={userCreatedAt}
+        visible={isGraduationOpen}
+      />
       {(isGameLoadingVisible || isMiniGameLoading) && <LoadingOverlay />}
     </View>
   );

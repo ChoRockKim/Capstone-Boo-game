@@ -55,7 +55,7 @@ const RegisterDetail = ({ setIsRegisterOpen }: RegisterProps) => {
     setIsCreatingUser(true);
 
     try {
-      const createdUser = await createUser({
+      await createUser({
         email: value.email.trim(),
         name: value.name.trim(),
         nickname: value.nickName.trim(),
@@ -63,7 +63,6 @@ const RegisterDetail = ({ setIsRegisterOpen }: RegisterProps) => {
         student_id: value.studentId.trim(),
       });
 
-      console.log("회원가입 완료:", createdUser);
       setStep(3);
     } catch (error) {
       setError("studentId", {
@@ -74,9 +73,7 @@ const RegisterDetail = ({ setIsRegisterOpen }: RegisterProps) => {
       setIsCreatingUser(false);
     }
   };
-  const onError = () => {
-    console.log("다 확인을 안 하셨네요;");
-  };
+  const onError = () => undefined;
 
   useEffect(() => {
     const show = Keyboard.addListener(KEYBOARD_SHOW_EVENT, (e) => {

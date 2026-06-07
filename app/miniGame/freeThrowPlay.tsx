@@ -10,6 +10,7 @@ import CrossIcon from "@/assets/icons/cross.svg";
 import CoinBox from "@/components/CoinBox/CoinBox";
 import MainButton from "@/components/MainButton/MainButton";
 import { simulateFreeThrowShot } from "@/components/MiniGame/freeThrow/freeThrowPhysics";
+import OutlinedText from "@/components/OutlinedText/OutlinedText";
 import SquareButton from "@/components/SquareButton/SquareButton";
 import TopAlert from "@/components/TopAlert/TopAlert";
 import { colors } from "@/constants/colors";
@@ -18,10 +19,13 @@ import { useGameStore } from "@/stores/useGameStore";
 import { useRequirePlayableSession } from "@/useHook/useRequirePlayableSession";
 import { startBackgroundMusicSession } from "@/utils/backgroundMusic";
 import {
+  createMiniGameResult,
   getServerApiErrorMessage,
-  playMiniGameEconomy,
+  rewardMiniGameEconomy,
+  startMiniGameEconomy,
 } from "@/utils/serverApi";
 import { playSoundEffect } from "@/utils/soundEffects";
+import { useQueryClient } from "@tanstack/react-query";
 import { Image } from "expo-image";
 import { router, useFocusEffect } from "expo-router";
 import { StatusBar } from "expo-status-bar";
@@ -155,7 +159,7 @@ const FREE_THROW_DIFFICULTY = {
 } as const;
 
 type FreeThrowOutcome = "overPower" | "success" | "underPower";
-type GamePhase = "animating" | "ended" | "playing";
+type GamePhase = "animating" | "countdown" | "ended" | "playing" | "preparing";
 type GaugeTarget = {
   left: number;
   width: number;
@@ -235,6 +239,7 @@ const createGaugeTarget = (round: number, trackWidth: number): GaugeTarget => {
 };
 
 export default function FreeThrowPlayScreen() {
+  const queryClient = useQueryClient();
   const canPlayMiniGame = useRequirePlayableSession();
   const { width } = useWindowDimensions();
   const accessToken = useGameStore((state) => state.accessToken);
@@ -243,9 +248,19 @@ export default function FreeThrowPlayScreen() {
   const consumeMiniGameHeart = useGameStore(
     (state) => state.consumeMiniGameHeart,
   );
+  const applyServerUnlockedAchievements = useGameStore(
+    (state) => state.applyServerUnlockedAchievements,
+  );
+  const recordMiniGameResult = useGameStore(
+    (state) => state.recordMiniGameResult,
+  );
+  const recordServerMiniGamePlay = useGameStore(
+    (state) => state.recordServerMiniGamePlay,
+  );
   const setGameState = useGameStore((state) => state.setGameState);
+  const [countdownValue, setCountdownValue] = useState(3);
   const [currentRound, setCurrentRound] = useState(1);
-  const [gamePhase, setGamePhase] = useState<GamePhase>("playing");
+  const [gamePhase, setGamePhase] = useState<GamePhase>("preparing");
   const gaugeTrackWidth = useMemo(
     () =>
       Math.max(
@@ -274,8 +289,6 @@ export default function FreeThrowPlayScreen() {
   );
   const [isShotSimulationAnimating, setIsShotSimulationAnimating] =
     useState(false);
-  const [isSuccessPathGuideHiddenForTest, setIsSuccessPathGuideHiddenForTest] =
-    useState(false);
   const [coinRewardAmount, setCoinRewardAmount] = useState<number>(
     FREE_THROW_GAME.rewardCoin,
   );
@@ -283,6 +296,13 @@ export default function FreeThrowPlayScreen() {
     id: 0,
     visible: false,
   });
+  const [restartErrorAlert, setRestartErrorAlert] = useState({
+    id: 0,
+    message: "하트가 부족해서 다시 시작할 수 없어요.",
+    title: "미니게임 시작 실패",
+    visible: false,
+  });
+  const [isRestartingRound, setIsRestartingRound] = useState(false);
   const markerProgress = useRef(new Animated.Value(0)).current;
   const markerProgressValueRef = useRef(0);
   const markerLoopRef = useRef<Animated.CompositeAnimation | null>(null);
@@ -290,21 +310,89 @@ export default function FreeThrowPlayScreen() {
   const ballTranslateY = useRef(new Animated.Value(0)).current;
   const ballScale = useRef(new Animated.Value(1)).current;
   const shotSimulationProgress = useRef(new Animated.Value(0)).current;
-  const gamePhaseRef = useRef<GamePhase>("playing");
+  const gamePhaseRef = useRef<GamePhase>("preparing");
   const hasConsumedEntryHeartRef = useRef(false);
+  const didSubmitResultRef = useRef(false);
+  const isStartingMiniGameSessionRef = useRef(false);
+  const isRestartingRoundRef = useRef(false);
+  const pendingSessionFinalizationRef = useRef<Promise<void> | null>(null);
+  const playSessionIdRef = useRef<string | null>(null);
+  const roundRunIdRef = useRef(0);
   const hoopFrameTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const hoopShakeDelayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
 
-  const consumeHeartOrExit = useCallback(() => {
-    if (consumeMiniGameHeart()) {
-      return true;
+  const startMiniGameSessionOrExit = useCallback(async () => {
+    if (isStartingMiniGameSessionRef.current) {
+      return false;
     }
 
-    router.replace("/miniGame/freeThrow");
-    return false;
-  }, [consumeMiniGameHeart]);
+    isStartingMiniGameSessionRef.current = true;
+    playSessionIdRef.current = null;
+
+    try {
+      if (accessToken) {
+        const startResult = await startMiniGameEconomy(
+          {
+            game_type: "freeThrow",
+            mode: "normal",
+          },
+          accessToken,
+        );
+
+        playSessionIdRef.current = startResult.play_session_id;
+        didSubmitResultRef.current = false;
+        setGameState({
+          heart: startResult.heart,
+          heartUpdatedAt:
+            startResult.heart_updated_at ??
+            (startResult.spent_heart > 0
+              ? new Date().toISOString()
+              : useGameStore.getState().heartUpdatedAt),
+          maxHeart: startResult.max_heart,
+        });
+        applyServerUnlockedAchievements(startResult.unlocked_achievements);
+        recordServerMiniGamePlay();
+        return true;
+      }
+
+      if (consumeMiniGameHeart()) {
+        didSubmitResultRef.current = false;
+        return true;
+      }
+
+      setRestartErrorAlert((currentAlert) => ({
+        id: currentAlert.id + 1,
+        message: "하트가 부족해서 다시 시작할 수 없어요.",
+        title: "미니게임 시작 실패",
+        visible: true,
+      }));
+      return false;
+    } catch (error) {
+      const errorMessage = getServerApiErrorMessage(
+        error,
+        "미니게임을 시작할 수 없어요.",
+      );
+
+      console.warn("자유투 넣기 시작 실패", errorMessage);
+      setRestartErrorAlert((currentAlert) => ({
+        id: currentAlert.id + 1,
+        message: errorMessage,
+        title: "미니게임 시작 실패",
+        visible: true,
+      }));
+      return false;
+    } finally {
+      isStartingMiniGameSessionRef.current = false;
+    }
+  }, [
+    accessToken,
+    applyServerUnlockedAchievements,
+    consumeMiniGameHeart,
+    recordServerMiniGamePlay,
+    setGameState,
+  ]);
 
   const roundConfig = useMemo(
     () => getFreeThrowRoundConfig(currentRound),
@@ -465,10 +553,44 @@ export default function FreeThrowPlayScreen() {
       return;
     }
 
-    if (consumeHeartOrExit()) {
+    void startMiniGameSessionOrExit().then((didStart) => {
+      if (!didStart) {
+        setGamePhase("ended");
+        gamePhaseRef.current = "ended";
+        return;
+      }
+
       hasConsumedEntryHeartRef.current = true;
+      setCountdownValue(3);
+      setGamePhase("countdown");
+      gamePhaseRef.current = "countdown";
+    });
+  }, [canPlayMiniGame, startMiniGameSessionOrExit]);
+
+  useEffect(() => {
+    if (!canPlayMiniGame || gamePhase !== "countdown") {
+      return;
     }
-  }, [canPlayMiniGame, consumeHeartOrExit]);
+
+    let nextCountdownValue = 3;
+
+    const countdownTimer = setInterval(() => {
+      nextCountdownValue -= 1;
+
+      if (nextCountdownValue >= 1) {
+        setCountdownValue(nextCountdownValue);
+        return;
+      }
+
+      clearInterval(countdownTimer);
+      setGamePhase("playing");
+      gamePhaseRef.current = "playing";
+    }, 1000);
+
+    return () => {
+      clearInterval(countdownTimer);
+    };
+  }, [canPlayMiniGame, gamePhase]);
 
   useEffect(() => {
     return () => {
@@ -485,20 +607,63 @@ export default function FreeThrowPlayScreen() {
   }, []);
 
   const resetBallAnimation = useCallback(() => {
+    markerLoopRef.current?.stop();
+    markerProgress.stopAnimation();
+    shotSimulationProgress.stopAnimation();
     setIsShotSimulationAnimating(false);
+    markerProgressValueRef.current = 0;
+    markerProgress.setValue(0);
     ballTranslateX.setValue(0);
     ballTranslateY.setValue(0);
     ballScale.setValue(1);
     shotSimulationProgress.setValue(0);
+    setActiveShotSimulation(defaultShotSimulation);
+    setHoopFrameIndex(0);
+
+    if (hoopShakeDelayTimerRef.current) {
+      clearTimeout(hoopShakeDelayTimerRef.current);
+      hoopShakeDelayTimerRef.current = null;
+    }
+
+    if (hoopFrameTimerRef.current) {
+      clearInterval(hoopFrameTimerRef.current);
+      hoopFrameTimerRef.current = null;
+    }
   }, [
     ballScale,
     ballTranslateX,
     ballTranslateY,
+    defaultShotSimulation,
+    markerProgress,
     shotSimulationProgress,
   ]);
 
+  const resetFreeThrowRoundState = useCallback(() => {
+    roundRunIdRef.current += 1;
+    didSubmitResultRef.current = false;
+    setCurrentRound(1);
+    setGaugeTarget(createGaugeTarget(1, gaugeTrackWidth));
+    setCountdownValue(3);
+    setCoinRewardAlert((currentAlert) => ({
+      ...currentAlert,
+      visible: false,
+    }));
+    setRestartErrorAlert((currentAlert) => ({
+      ...currentAlert,
+      visible: false,
+    }));
+    resetBallAnimation();
+  }, [gaugeTrackWidth, resetBallAnimation]);
+
   const hideCoinRewardAlert = useCallback(() => {
     setCoinRewardAlert((currentAlert) => ({
+      ...currentAlert,
+      visible: false,
+    }));
+  }, []);
+
+  const hideRestartErrorAlert = useCallback(() => {
+    setRestartErrorAlert((currentAlert) => ({
       ...currentAlert,
       visible: false,
     }));
@@ -512,36 +677,123 @@ export default function FreeThrowPlayScreen() {
     }));
   }, []);
 
+  const submitMiniGameResult = useCallback(
+    async (finalGoalCount: number, success: boolean) => {
+      if (!accessToken || didSubmitResultRef.current) {
+        return;
+      }
+
+      didSubmitResultRef.current = true;
+
+      try {
+        const result = await createMiniGameResult(
+          {
+            game_type: "freeThrow",
+            ended_reason: success ? "success" : "failed",
+            location: "obamaHall",
+            mode: "normal",
+            play_session_id: playSessionIdRef.current,
+            score: finalGoalCount,
+            success,
+          },
+          accessToken,
+        );
+
+        applyServerUnlockedAchievements(result.unlocked_achievements);
+        void queryClient.invalidateQueries({
+          queryKey: ["minigames", "rankings"],
+        });
+      } catch (error) {
+        console.warn(
+          "자유투 넣기 결과 저장 실패",
+          getServerApiErrorMessage(error, "미니게임 결과 저장 실패"),
+        );
+      }
+    },
+    [accessToken, applyServerUnlockedAchievements, queryClient],
+  );
+
+  const finalizeMiniGameSession = useCallback(
+    (finalGoalCount: number, success: boolean) => {
+      recordMiniGameResult("freeThrow", finalGoalCount);
+
+      const finalizationPromise = submitMiniGameResult(
+        finalGoalCount,
+        success,
+      );
+
+      pendingSessionFinalizationRef.current = finalizationPromise;
+      void finalizationPromise.finally(() => {
+        if (pendingSessionFinalizationRef.current === finalizationPromise) {
+          pendingSessionFinalizationRef.current = null;
+        }
+      });
+
+      return finalizationPromise;
+    },
+    [recordMiniGameResult, submitMiniGameResult],
+  );
+
+  const waitForPendingSessionFinalization = useCallback(async () => {
+    const pendingSessionFinalization = pendingSessionFinalizationRef.current;
+
+    if (pendingSessionFinalization) {
+      await pendingSessionFinalization;
+    }
+  }, []);
+
   const applyMiniGameSuccessReward = useCallback(async () => {
+    const optimisticRewardCoin = FREE_THROW_GAME.rewardCoin;
+
+    adjustCoin(optimisticRewardCoin);
+    showCoinRewardAlert(optimisticRewardCoin);
+
     if (!accessToken) {
-      adjustCoin(FREE_THROW_GAME.rewardCoin);
-      showCoinRewardAlert(FREE_THROW_GAME.rewardCoin);
+      return;
+    }
+
+    if (!playSessionIdRef.current) {
+      console.warn("자유투 넣기 보상 동기화 실패: play_session_id 없음");
+      adjustCoin(-optimisticRewardCoin);
       return;
     }
 
     try {
-      const rewardResult = await playMiniGameEconomy(accessToken);
+      const rewardResult = await rewardMiniGameEconomy(
+        {
+          game_type: "freeThrow",
+          mode: "normal",
+          play_session_id: playSessionIdRef.current,
+          score: currentRound,
+        },
+        accessToken,
+      );
 
       setGameState({
         coin: rewardResult.coin,
-        heart: rewardResult.heart,
-        heartUpdatedAt:
-          rewardResult.spent_heart > 0
-            ? new Date().toISOString()
-          : useGameStore.getState().heartUpdatedAt,
-        maxHeart: rewardResult.max_heart,
       });
-
-      if (rewardResult.awarded_coin > 0) {
-        showCoinRewardAlert(rewardResult.awarded_coin);
-      }
+      applyServerUnlockedAchievements(rewardResult.unlocked_achievements, {
+        coin: rewardResult.coin,
+      });
+      void queryClient.invalidateQueries({
+        queryKey: ["minigames", "rankings"],
+      });
     } catch (error) {
+      adjustCoin(-optimisticRewardCoin);
       console.warn(
         "자유투 넣기 보상 동기화 실패",
         getServerApiErrorMessage(error, "미니게임 보상 동기화 실패"),
       );
     }
-  }, [accessToken, adjustCoin, setGameState, showCoinRewardAlert]);
+  }, [
+    accessToken,
+    adjustCoin,
+    applyServerUnlockedAchievements,
+    currentRound,
+    queryClient,
+    setGameState,
+    showCoinRewardAlert,
+  ]);
 
   const playHoopSuccessAnimation = useCallback(() => {
     if (hoopFrameTimerRef.current) {
@@ -634,26 +886,60 @@ export default function FreeThrowPlayScreen() {
     [gaugeTrackWidth, resetBallAnimation],
   );
 
-  const endFreeThrowGame = useCallback(() => {
+  const endFreeThrowGame = useCallback((finalGoalCount: number) => {
+    roundRunIdRef.current += 1;
+    finalizeMiniGameSession(finalGoalCount, false);
     setGamePhase("ended");
     gamePhaseRef.current = "ended";
-  }, []);
+  }, [finalizeMiniGameSession]);
 
-  const restartFreeThrowGame = useCallback(() => {
-    if (!consumeHeartOrExit()) {
+  const restartFreeThrowGame = useCallback(async () => {
+    if (
+      isStartingMiniGameSessionRef.current ||
+      isRestartingRoundRef.current
+    ) {
       return;
     }
 
-    hasConsumedEntryHeartRef.current = true;
-    prepareNextAttempt(1);
-  }, [consumeHeartOrExit, prepareNextAttempt]);
+    isRestartingRoundRef.current = true;
+    setIsRestartingRound(true);
+
+    try {
+      roundRunIdRef.current += 1;
+      resetFreeThrowRoundState();
+      await waitForPendingSessionFinalization();
+      const didStart = await startMiniGameSessionOrExit();
+
+      if (!didStart) {
+        gamePhaseRef.current = "ended";
+        setGamePhase("ended");
+        return;
+      }
+
+      hasConsumedEntryHeartRef.current = true;
+      setGamePhase("countdown");
+      gamePhaseRef.current = "countdown";
+    } finally {
+      isRestartingRoundRef.current = false;
+      setIsRestartingRound(false);
+    }
+  }, [
+    resetFreeThrowRoundState,
+    startMiniGameSessionOrExit,
+    waitForPendingSessionFinalization,
+  ]);
 
   const resolveShot = useCallback(
     async (attempt: FreeThrowShotAttempt) => {
+      const shotRunId = roundRunIdRef.current;
       const didScore = await runShotAnimation(attempt);
 
+      if (shotRunId !== roundRunIdRef.current) {
+        return;
+      }
+
       if (!didScore) {
-        endFreeThrowGame();
+        endFreeThrowGame(Math.max(currentRound - 1, 0));
         return;
       }
 
@@ -736,37 +1022,10 @@ export default function FreeThrowPlayScreen() {
     resolveShot,
   ]);
 
-  const handleTestSuccessPress = useCallback(() => {
-    if (gamePhaseRef.current !== "playing") {
-      return;
-    }
-
-    if (!canPlayMiniGame || !hasConsumedEntryHeartRef.current) {
-      return;
-    }
-
-    playSoundEffect("basicClick");
-    markerLoopRef.current?.stop();
-    markerProgress.stopAnimation((value) => {
-      markerProgressValueRef.current = value;
-    });
-    gamePhaseRef.current = "animating";
-    setGamePhase("animating");
-    setIsSuccessPathGuideHiddenForTest(true);
-
-    void resolveShot({
-      missRatio: 0,
-      outcome: "success",
-    }).finally(() => {
-      setIsSuccessPathGuideHiddenForTest(false);
-    });
-  }, [canPlayMiniGame, markerProgress, resolveShot]);
-
   const handleExitPress = () => {
     router.replace("/miniGame/freeThrow");
   };
-  const shouldShowSuccessPathGuides =
-    SHOW_SUCCESS_SHOT_PATH_GUIDES && !isSuccessPathGuideHiddenForTest;
+  const shouldShowSuccessPathGuides = SHOW_SUCCESS_SHOT_PATH_GUIDES;
   const currentGoalCount = Math.max(currentRound - 1, 0);
 
   return (
@@ -970,86 +1229,87 @@ export default function FreeThrowPlayScreen() {
         </View>
       </SafeAreaView>
 
-      <View style={styles.gaugeDock}>
-        <View style={styles.gaugeStack}>
-          <View
-            style={[styles.testSuccessButtonRow, { width: gaugeTrackWidth }]}
-          >
-            <Pressable
-              disabled={gamePhase !== "playing"}
-              onPress={handleTestSuccessPress}
-              style={({ pressed }) => [
-                styles.testSuccessButton,
-                pressed && styles.testSuccessButtonPressed,
-                gamePhase !== "playing" && styles.testSuccessButtonDisabled,
-              ]}
-            >
-              <Text style={styles.testSuccessButtonText}>슛 성공</Text>
-            </Pressable>
-          </View>
-          <View
-            style={[
-              styles.gaugeTrack,
-              {
-                height: FREE_THROW_GAME.gauge.trackHeight,
-                maxHeight: FREE_THROW_GAME.gauge.trackHeight,
-                minHeight: FREE_THROW_GAME.gauge.trackHeight,
-                transform: [{ scaleY: FREE_THROW_GAME.gauge.visualScaleY }],
-                width: gaugeTrackWidth,
-              },
-            ]}
-          >
-            <Svg
-              height={FREE_THROW_GAME.gauge.trackHeight}
+      {gamePhase === "playing" || gamePhase === "animating" ? (
+        <View style={styles.gaugeDock}>
+          <View style={styles.gaugeStack}>
+            <View
               style={[
-                StyleSheet.absoluteFill,
+                styles.gaugeTrack,
                 {
+                  height: FREE_THROW_GAME.gauge.trackHeight,
                   maxHeight: FREE_THROW_GAME.gauge.trackHeight,
                   minHeight: FREE_THROW_GAME.gauge.trackHeight,
+                  transform: [{ scaleY: FREE_THROW_GAME.gauge.visualScaleY }],
+                  width: gaugeTrackWidth,
                 },
               ]}
-              width={gaugeTrackWidth}
             >
-              <Path
-                d={createPixelPath(gaugeOuterWidth, gaugeOuterHeight)}
-                fill={colors.WHITE_NORMAL}
-                stroke={colors.BLACK_NORMAL}
-                strokeWidth={PIXEL_OUTER_BORDER_WIDTH}
-                transform={`translate(${gaugeOuterOffset}, ${gaugeOuterOffset})`}
-              />
-            </Svg>
-            <View style={styles.gaugeContentLayer}>
-              <View
+              <Svg
+                height={FREE_THROW_GAME.gauge.trackHeight}
                 style={[
-                  styles.targetZone,
+                  StyleSheet.absoluteFill,
                   {
-                    left: gaugeTarget.left,
-                    width: gaugeTarget.width,
+                    maxHeight: FREE_THROW_GAME.gauge.trackHeight,
+                    minHeight: FREE_THROW_GAME.gauge.trackHeight,
                   },
                 ]}
-              />
-              <Animated.View
-                style={[
-                  styles.gaugeMarker,
-                  {
-                    transform: [{ translateX: markerTranslateX }],
-                    width: FREE_THROW_GAME.gauge.markerWidth,
-                  },
-                ]}
+                width={gaugeTrackWidth}
+              >
+                <Path
+                  d={createPixelPath(gaugeOuterWidth, gaugeOuterHeight)}
+                  fill={colors.WHITE_NORMAL}
+                  stroke={colors.BLACK_NORMAL}
+                  strokeWidth={PIXEL_OUTER_BORDER_WIDTH}
+                  transform={`translate(${gaugeOuterOffset}, ${gaugeOuterOffset})`}
+                />
+              </Svg>
+              <View style={styles.gaugeContentLayer}>
+                <View
+                  style={[
+                    styles.targetZone,
+                    {
+                      left: gaugeTarget.left,
+                      width: gaugeTarget.width,
+                    },
+                  ]}
+                />
+                <Animated.View
+                  style={[
+                    styles.gaugeMarker,
+                    {
+                      transform: [{ translateX: markerTranslateX }],
+                      width: FREE_THROW_GAME.gauge.markerWidth,
+                    },
+                  ]}
+                />
+              </View>
+            </View>
+
+            <View style={[styles.shootButtonSlot, { width: gaugeTrackWidth }]}>
+              <MainButton
+                disabled={gamePhase !== "playing"}
+                size="S"
+                label="슛!"
+                onPress={handleShootPress}
+                width={gaugeTrackWidth}
               />
             </View>
           </View>
-
-          <View style={[styles.shootButtonSlot, { width: gaugeTrackWidth }]}>
-            <MainButton
-              size="S"
-              label="슛!"
-              onPress={handleShootPress}
-              width={gaugeTrackWidth}
-            />
-          </View>
         </View>
-      </View>
+      ) : null}
+
+      {gamePhase === "countdown" ? (
+        <View pointerEvents="none" style={styles.countdownLayer}>
+          <OutlinedText
+            color={colors.WHITE_NORMAL}
+            outlineColor={colors.BLACK_NORMAL}
+            outlineWidth={2}
+            style={styles.countdownText}
+          >
+            {countdownValue}
+          </OutlinedText>
+        </View>
+      ) : null}
 
       {gamePhase === "ended" ? (
         <View style={styles.resultOverlay}>
@@ -1082,6 +1342,7 @@ export default function FreeThrowPlayScreen() {
                 width={128}
               />
               <MainButton
+                disabled={isRestartingRound}
                 height={60}
                 label="> 다시시작"
                 onPress={restartFreeThrowGame}
@@ -1099,6 +1360,13 @@ export default function FreeThrowPlayScreen() {
         title={"+" + coinRewardAmount + " 코인 획득!"}
         visibilityKey={coinRewardAlert.id}
         visible={coinRewardAlert.visible}
+      />
+      <TopAlert
+        message={restartErrorAlert.message}
+        onClose={hideRestartErrorAlert}
+        title={restartErrorAlert.title}
+        visibilityKey={restartErrorAlert.id}
+        visible={restartErrorAlert.visible}
       />
     </View>
   );
@@ -1156,6 +1424,20 @@ const styles = StyleSheet.create({
     zIndex: 4,
   },
   ballImage: {},
+  countdownLayer: {
+    ...StyleSheet.absoluteFill,
+    zIndex: 8,
+    elevation: 8,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  countdownText: {
+    fontFamily: fonts.BASIC,
+    fontSize: 96,
+    includeFontPadding: false,
+    lineHeight: 104,
+    textAlign: "center",
+  },
   successPathGuideLayer: {
     ...StyleSheet.absoluteFill,
     zIndex: 6,
@@ -1235,34 +1517,6 @@ const styles = StyleSheet.create({
   gaugeStack: {
     alignItems: "center",
     gap: 2,
-  },
-  testSuccessButtonRow: {
-    alignItems: "flex-end",
-  },
-  testSuccessButton: {
-    height: 28,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 10,
-    backgroundColor: colors.WHITE_NORMAL,
-    borderColor: colors.BLACK_NORMAL,
-    borderRadius: 4,
-    borderWidth: 1,
-    marginBottom: 4,
-    ...miniGameUiShadow,
-  },
-  testSuccessButtonPressed: {
-    backgroundColor: colors.GREEN_LIGHT_ACTIVE,
-  },
-  testSuccessButtonDisabled: {
-    opacity: 0.45,
-  },
-  testSuccessButtonText: {
-    color: colors.BLACK_NORMAL,
-    fontFamily: "NeoDunggeunmo",
-    fontSize: 12,
-    includeFontPadding: false,
-    lineHeight: 16,
   },
   resultOverlay: {
     ...StyleSheet.absoluteFill,

@@ -9,6 +9,7 @@ export type RoomGuestbookListEntry = {
   authorName: string;
   id: string;
   message: string;
+  serverEntryId?: number;
 };
 
 export const ROOM_GUESTBOOK_DUMMY_ENTRIES: RoomGuestbookListEntry[] = [

@@ -1,7 +1,7 @@
 # AGENTS.md
 
 ## 프로젝트 개요
-한국외대 마스코트 캐릭터 `부`를 학식, 퀴즈, 친구, 마이룸 기능과 연결해 성장시키는 Expo 기반 React Native 육성형 캠퍼스 앱입니다.
+한국외대 마스코트 캐릭터 `부`를 학식, 퀴즈, 친구, 마이룸, 미니게임 기능과 연결해 성장시키는 Expo 기반 React Native 육성형 캠퍼스 앱입니다.
 
 ## 기술 스택
 - 언어: TypeScript, JavaScript
@@ -26,15 +26,17 @@
   - `miniGame/index.tsx`: 캠퍼스 장소 기반 미니게임 허브, 장소 카드, 설정/친구/프로필 패널
   - `miniGame/catchTheMajor.tsx`: 전공책 받기 시작 화면
   - `miniGame/catchTheMajorPlay.tsx`: 전공책 받기 실제 플레이 화면, Reanimated 기반 낙하/충돌 처리
-  - `miniGame/catchBoo.tsx`: 부 잡기 시작 화면. 현재 실제 플레이는 준비 중
-  - `miniGame/freeThrow.tsx`: 자유투 넣기 시작 화면. 현재 실제 플레이는 준비 중
+  - `miniGame/catchBoo.tsx`: 부 잡기 시작 화면
+  - `miniGame/catchBooPlay.tsx`: 부 잡기 실제 플레이 화면, 지정 구역 랜덤 출몰/타격 처리
+  - `miniGame/freeThrow.tsx`: 자유투 넣기 시작 화면
+  - `miniGame/freeThrowPlay.tsx`: 자유투 넣기 실제 플레이 화면, 게이지/공/골대 애니메이션 처리
   - `room/index.tsx`: 마이룸 화면, 방/가구 렌더링, 커스텀 UI
   - `room/[friendId].tsx`: 친구 방 방문 화면, 친구 방 snapshot 렌더링, 방명록 작성
 - `components/`
   - `SquareButton`, `MainButton`, `CoinBox`, `ProgressBar`, `TopAlert`, `BooChat` 등 공통 UI
   - `MealPanel`, `QuizPanel`, `FriendPanel`, `FriendList`, `DeveloperPanel`, `SoundSettings`, `TutorialPanel` 등 기능별 패널
   - `LoadingOverlay/`: 로딩 화면 UI와 로딩 화면 전용 이미지 source/preload registry
-  - `MiniGame/`: 미니게임 장소/시작 화면 registry, 시작 화면, 랭킹 모달, 룰 모달, 하트 UI
+  - `MiniGame/`: 미니게임 장소/시작 화면 registry, 랭킹 모달, 룰 모달, 하트 UI, 자유투 물리 계산
   - `Room/`: 마이룸 에셋 registry, 좌표, 공통 방 렌더러, 미니 부 애니메이션, 방명록 모달
 - `stores/`
   - `useGameStore.ts`: 전역 게임 상태, persist, XP/식사/퀴즈/친구/마이룸/설정 액션
@@ -56,7 +58,7 @@
   - `plates/`: 학식/음식 이미지
   - `Rooms/`: 마이룸 방/가구 이미지
   - `places/`: 미니게임 장소 배경 이미지
-  - `miniGame/`: 미니게임 아이콘과 전공책 받기 플레이/룰 이미지
+  - `miniGame/`: 미니게임 아이콘과 전공책 받기/부 잡기/자유투 플레이 및 룰 이미지
   - `musics/`: BGM/SFX
   - `tutorials/`: 튜토리얼 이미지
   - `fonts/`: `NeoDunggeunmo.ttf`
@@ -93,6 +95,10 @@
   - `app/miniGame/index.tsx` -> `/miniGame`
   - `app/miniGame/catchTheMajor.tsx` -> `/miniGame/catchTheMajor`
   - `app/miniGame/catchTheMajorPlay.tsx` -> `/miniGame/catchTheMajorPlay`
+  - `app/miniGame/catchBoo.tsx` -> `/miniGame/catchBoo`
+  - `app/miniGame/catchBooPlay.tsx` -> `/miniGame/catchBooPlay`
+  - `app/miniGame/freeThrow.tsx` -> `/miniGame/freeThrow`
+  - `app/miniGame/freeThrowPlay.tsx` -> `/miniGame/freeThrowPlay`
   - `app/room/index.tsx` -> `/room`
 - 컴포넌트는 함수형 컴포넌트와 hooks 중심으로 작성합니다.
 - 스타일은 각 파일 하단의 `StyleSheet.create`로 관리하는 패턴이 많습니다.
@@ -110,9 +116,25 @@
   - 예: `const coin = useGameStore((state) => state.coin);`
 - UI 상태는 화면 내부 `useState`로 관리하는 패턴이 많습니다.
   - 예: `isMealOpen`, `isQuizOpen`, `isCustomizeMode`
+- 오래 걸리거나 실패 가능성이 있는 비동기 작업은 버튼 label만 바꾸지 말고 `TopAlert`로 진행/성공/실패 상태를 보여줍니다. 화면 orchestration 레이어에서 `showTopAlert` callback을 내려주는 방식을 우선합니다.
 - 버튼 효과음은 `SquareButton`, `MainButton`에서 `playSoundEffect("basicClick")`로 처리합니다.
 - 화면별 BGM은 `useFocusEffect`에서 `startBackgroundMusicSession(...)`을 호출하는 패턴입니다.
 - 서버 요청은 `useHook/useTodayMeal.ts`처럼 TanStack Query custom hook으로 감싸는 패턴입니다.
+- 저장, 수정, 삭제, 서버 동기화처럼 시간이 걸리는 비동기 작업은 버튼 label만 `저장 중`처럼 바꾸는 것으로 끝내지 말고, 화면 상단 `TopAlert`로 진행 중/성공/실패 상태를 함께 표시합니다.
+  - 예: `닉네임 변경 중` -> `닉네임 변경 완료` 또는 `저장 실패`
+  - 각 feature panel이 직접 `TopAlert`를 렌더링하지 않는 경우, route orchestration 레이어에서 alert callback을 props로 내려받는 패턴을 우선합니다.
+
+## 하네스 엔지니어링 계획
+작업자가 증상 원인을 추정하다가 기획/도메인 데이터를 임의로 바꾸는 일을 막기 위한 필수 절차입니다.
+
+- 증상 수정 전에는 먼저 재현 경로를 코드에서 특정합니다. 예: 버튼 클릭 -> handler -> registry/data -> route 순서로 실제 호출 흐름을 확인합니다.
+- 장소, 라우트, 캐릭터, 보상 수치, 하트 정책, 업적 조건, 서버/로컬 권위 기준처럼 기획 의미가 있는 값은 사용자 요청이 명시적이지 않으면 변경하지 않습니다.
+- 버그 원인이 기획 데이터처럼 보이더라도 먼저 “현재 설계값”으로 간주합니다. 설계값 변경이 필요해 보이면 수정하지 말고 근거와 영향 범위를 보고합니다.
+- “준비 중”, “하트 부족”, “서버 동기화 실패” 같은 알림 버그는 알림이 발생한 조건문과 호출자를 좁혀 수정합니다. 장소/배경/게임 매핑을 바꾸는 방식으로 우회하지 않습니다.
+- registry 파일(`components/MiniGame/MiniGameData.ts`, `components/Room/RoomData.ts`, 캐릭터/학식/업적 데이터)은 기능 연결의 진실 공급원입니다. 이 파일을 수정할 때는 해당 값이 버그인지, 아니면 의도된 설계인지 먼저 확인합니다.
+- 수정 전후에는 최소한 관련 파일 diff를 확인해서 의도한 버그 경로 외의 도메인 값이 바뀌지 않았는지 검사합니다.
+- 검증은 변경 범위에 맞게 실행합니다. 기본은 `npx tsc --noEmit`, 필요 시 `npm run lint`, UI/라우팅 변경 시 관련 handler/route 검색 결과를 함께 확인합니다.
+- 사용자가 특정 증상을 말했을 때 임의 해석으로 범위를 넓히지 않습니다. 모호하면 코드 증거로 좁히고, 그래도 도메인 판단이 필요하면 질문합니다.
 
 ## 핵심 도메인 개념
 - `부`: 사용자가 키우는 캐릭터입니다. 학년과 상태에 따라 이미지가 바뀝니다.
@@ -126,6 +148,7 @@
   - 3학년 -> 4학년: 2500 XP
   - 4학년 -> 졸업: 3000 XP
 - 진화: XP 증가로 학년이 상승하면 `pendingEvolution`이 생성되고, `app/game/index.tsx`에서 진화 컷신을 시작합니다.
+- 졸업: 4학년 XP를 모두 채우면 일반 진화 컷신 대신 졸업 화면을 표시합니다. 졸업 화면은 `GraduationOverlay`를 사용하고, 배경은 `assets/images/graduate-background.png`, 캐릭터는 `assets/characters/graduated-boo.png`, BGM은 `assets/musics/bgm/graduation.mp3`입니다. 플레이 일수는 가입일 기준, 학식/퀴즈/미니게임 요약은 현재 로컬 통계 기준입니다.
 - 학식:
   - 조식: 08:00 ~ 10:00
   - 중식: 11:00 ~ 14:30
@@ -143,13 +166,21 @@
 - 미니게임:
   - 장소 허브는 `/miniGame`이며, 장소/시작 화면/이미지 registry는 `components/MiniGame/MiniGameData.ts`에 있습니다.
   - 미니게임 ID는 `catchTheMajor`, `catchBoo`, `freeThrow`입니다.
-  - 현재 실제 플레이 구현은 `app/miniGame/catchTheMajorPlay.tsx`의 전공책 받기입니다.
+  - 실제 플레이 구현은 `app/miniGame/catchTheMajorPlay.tsx`, `app/miniGame/catchBooPlay.tsx`, `app/miniGame/freeThrowPlay.tsx`에 있습니다.
   - 전공책 받기 일반모드는 30초 제한, 50P 이상 성공, 성공 시 `+3 coin`을 지급합니다.
   - 전공책 받기 무한모드는 시간 제한이 없고 방해물 3회 충돌 시 종료됩니다. 점수 아이템을 먹을 때마다 낙하 속도/스폰 속도가 1%씩 빨라지며 최대 1.8배까지 증가합니다.
   - 전공책 받기 무한모드 라우트 param은 `mode=infinite`입니다. 기존 `mode=hard`는 호환 alias로 처리하며, 친구 랭킹 데이터는 기존 `miniGameHardScores`를 재사용합니다.
   - 전공책 받기 인게임 화면은 iOS 좌->우 swipe back gesture를 비활성화합니다.
+  - 부 잡기 일반모드는 30초 제한, 50P 이상 성공, 성공 시 `+3 coin`을 지급합니다.
+  - 자유투 넣기는 오바마홀 시작 화면에서 진입하며, 5회 연속 성공 시 `+3 coin`을 지급합니다. 시작 시 서버 미니게임 세션/하트 차감이 완료되기 전까지 슛 버튼은 비활성화합니다.
   - 하트는 서버 유저 데이터(`heart`, `max_heart`, `heart_updated_at`)와 동기화합니다. 비로그인/서버 데이터 부재 시에는 로컬 fallback으로 계산합니다.
-  - 로그인 상태에서는 더미 친구 점수 기반 미니게임 랭킹을 표시하지 않습니다. 현재 백엔드에는 전체 랭킹 목록 API가 없어 랭킹 목록은 서버 API 추가가 필요합니다.
+  - 로그인 상태에서는 더미 친구 점수 기반 미니게임 랭킹을 표시하지 않습니다. 전체/친구 랭킹 목록은 서버 `/minigames/rankings`, `/minigames/rankings/friends`를 사용합니다.
+  - 재시작 시 이전 라운드의 타이머, 애니메이션 callback, 보상/결과 제출 flag가 새 라운드에 영향을 주지 않도록 초기화합니다.
+- 게스트 모드:
+  - 게스트 진행도는 로그인 세션과 분리된 `guestGameSnapshot`에 저장하고 다음 게스트 시작 시 복원합니다.
+  - 기본값은 학번 `00000000`, 이름 `외대생`, 닉네임 `부`입니다.
+  - 게스트에서는 비밀번호 변경, 친구 관리, 친구 패널, 친구 방, 방명록 작성, 친구 랭킹 fallback을 사용하지 않습니다.
+  - 게스트 시작/복원/초기화 시 로컬 `first_login` 업적을 즉시 달성 처리합니다.
 - 학식 API:
   - `utils/getTodayMeal.ts`에서 `https://hufs-clock-api.vercel.app/api/data`를 axios로 요청합니다.
   - 응답 메뉴는 `TodayMealSection[]`으로 정규화됩니다.
@@ -163,7 +194,7 @@
   - 로그인 ID는 이메일이 아니라 9자리 학번이며, 회원가입 이메일은 `@hufs.ac.kr` 도메인으로 제한됩니다.
   - 로컬 백엔드는 별도 DB 설정이 없으면 `boo_app.db` SQLite를 사용하고, Railway 배포는 `DATABASE_URL` PostgreSQL 연결 문자열이 필요합니다.
   - 이메일 인증/비밀번호 재설정은 SMTP 환경변수(`SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL`, `SMTP_FROM_NAME`, `SMTP_USE_TLS`)에 의존합니다.
-  - 현재 연결 우선순위는 인증/유저 -> 학식 -> 퀴즈 -> 친구 -> 마이룸/상점 -> 미니게임/경제 상태입니다.
+  - 현재 연결 우선순위는 인증/유저 -> 학식 -> 퀴즈 -> 친구 -> 마이룸/상점 -> 미니게임/경제 상태 -> 업적/설정입니다.
   - 서버 응답 필드는 snake_case가 많으므로 UI/store에는 직접 흘리지 말고 API adapter/mapper에서 camelCase로 변환하는 방식을 우선합니다.
 - 사운드:
   - BGM은 `main`, `myRoom`, `titleLogin`, `miniGameMain`, `miniGameIngame` 트랙으로 관리됩니다.
@@ -173,8 +204,10 @@
 ## 주의사항
 - `.env.example` 또는 `.env*` 파일은 현재 확인되지 않았습니다. 환경변수 정책은 확인 필요.
 - 서버 연동 작업 전에는 `docs/api/openapi.json`과 `docs/api/server-api-summary.md`를 먼저 확인하세요. Swagger와 실제 서버 동작이 다를 수 있는 엔드포인트는 작은 호출로 검증한 뒤 UI에 연결하세요.
-- `/economy/minigame/play`는 Swagger상 request body가 없습니다. 미니게임 하트 차감/보상 흐름 연결 전 백엔드 동작 확인이 필요합니다.
-- `/minigames/ranking/me`는 Swagger상 game type/mode query parameter가 없습니다. 게임별/모드별 랭킹이 필요하면 백엔드 확인이 필요합니다.
+- 미니게임 하트 차감/보상은 신규 세션형 API인 `/economy/minigame/start`, `/economy/minigame/reward`를 우선 사용합니다. 기존 `/economy/minigame/play`는 legacy fallback으로만 취급합니다.
+- `/minigames/ranking/me`는 Swagger상 game type/mode query parameter가 없습니다. 게임별/모드별 랭킹 목록은 `/minigames/rankings`, `/minigames/rankings/friends`를 사용합니다.
+- 졸업 리포트의 누적 학식/퀴즈/미니게임 통계는 현재 로컬 통계입니다. 서버 권위 통계가 필요하면 백엔드에 졸업 summary 또는 bootstrap field 추가가 필요합니다.
+- 게스트 모드는 로컬 전용입니다. 게스트에서 친구/방명록/친구 랭킹 API를 호출하지 않도록 유지하세요.
 - Node 26/Homebrew Node로 실행하면 Expo/Metro나 optional native dependency가 불안정할 수 있습니다. 개발 서버와 설치는 Node 20 환경에서 실행하세요.
 - `README.md`는 Expo 기본 템플릿 내용입니다. 프로젝트 실제 설명은 `docs/technical-learning-guide.md`가 더 상세합니다.
 - `ios/`, `android/` native 폴더가 존재합니다. Expo config/app.json으로 관리되는 설정과 직접 수정한 native 설정이 섞일 수 있으므로 prebuild 전후 변경사항을 확인해야 합니다.
@@ -188,6 +221,7 @@
 - AsyncStorage native module이 없으면 `noopStorage`로 fallback되어 상태가 영구 저장되지 않을 수 있습니다.
 - `app/game/index.tsx`는 여러 패널/타이머/진화/말풍선/로딩을 한 화면에서 조율합니다. 수정 시 타이머 cleanup과 overlay open state를 함께 확인해야 합니다.
 - `app/miniGame/catchTheMajorPlay.tsx`는 Reanimated shared value, frame callback, collision 판정, 하트/랭킹 UI를 한 화면에서 조율합니다. 수정 시 animation cleanup, `useFocusEffect` BGM 세션, router 이동을 함께 확인해야 합니다.
+- `app/miniGame/catchBooPlay.tsx`와 `app/miniGame/freeThrowPlay.tsx`는 서버 미니게임 세션 시작, 하트 차감, 결과 저장, 보상 동기화를 한 화면에서 조율합니다. 수정 시 첫 입력 비활성 상태, 보상 낙관 처리 rollback, 재시작 하트 부족 alert를 함께 확인해야 합니다.
 - 로딩 오버레이 이미지 source와 preload는 `components/LoadingOverlay/LoadingOverlayAssets.ts`만 진실로 둡니다. 로딩 화면 배경/알 이미지를 다른 파일에서 새로 `require(...)`하지 말고 해당 registry를 import하세요.
 - `app/_layout.tsx`는 SplashScreen을 닫기 전에 `preloadLoadingOverlayAssets()`를 await합니다. 로딩창이 필요한 새 화면을 추가해도 로딩 오버레이 자체 이미지는 앱 시작 시 준비되어 있어야 합니다.
 - `app/game/index.tsx`의 로그인 후 초기 진입은 critical asset만 await합니다. 현재 부 이미지 등 첫 화면에 필요한 최소 에셋은 `preloadGameCriticalImageAssets`, 캐릭터 전체/학식/마이룸/튜토리얼 이미지는 `preloadGameDeferredImageAssets`에서 background preload합니다.
@@ -212,19 +246,18 @@
 - 마이룸 상점 구매는 서버 구매 성공 후 로컬 구매 함수를 다시 호출하지 않도록 수정했습니다. 서버가 내려준 `coin`으로 동기화하고, 로컬 owned/equipped 상태만 맞춥니다.
 - 방명록 목록은 서버 `/rooms/{user_id}/guestbook` 결과를 표시합니다. 서버 데이터가 없을 때 더미 방명록이 뜨지 않도록 기본값을 빈 배열로 바꿨습니다.
 - 친구 방 방문은 서버 친구의 `serverUserId`를 라우트 param으로 넘기고 `/rooms/{user_id}` 조회 결과를 로컬 룸 에셋 id로 매핑해 렌더링합니다.
-- 미니게임 플레이 결과 저장과 성공 보상은 서버 `/minigames/results`, `/economy/minigame/play`을 사용합니다. 로그인 상태에서 더미 친구 점수로 현재 랭킹을 계산하지 않습니다.
+- 미니게임 플레이 시작/하트 차감은 서버 `/economy/minigame/start`, 성공 보상은 `/economy/minigame/reward`, 결과 저장은 `/minigames/results`를 사용합니다. 로그인 상태에서 더미 친구 점수로 현재 랭킹을 계산하지 않습니다.
+- 업적은 서버 `/achievements/me`, `/achievements/events`를 우선 기준으로 동기화합니다. 로그인 상태에서는 로컬 persisted 업적 키가 서버 진행도를 가리지 않도록 서버 진행도를 권위값으로 반영합니다.
 
 ### 남은 서버/더미 정리 작업
-- 전체 미니게임 랭킹 목록 API가 필요합니다. 현재 서버에는 `/minigames/ranking/me`만 확인되어 있어 친구/전체 랭킹 리스트를 실제 서버 데이터로 표시할 수 없습니다.
-- `/minigames/ranking/me`는 Swagger상 game type/mode query parameter가 없습니다. 전공책 받기/부 잡기/무한모드별 랭킹 분리가 필요한지 백엔드 확인이 필요합니다.
-- 퀴즈 플레이 가능 타이밍이 로컬 상태와 서버 `/quizzes/play-status` 기준 사이에서 어긋날 수 있습니다. 로그인 상태에서는 남은 횟수/쿨타임/다음 가능 시각을 서버 응답만 단일 기준으로 삼고, 로컬 `lastQuizAttemptAt`/`quizAttemptsToday`는 비로그인 fallback 또는 서버 동기화 보조값으로만 제한해야 합니다.
-- 자동 로그인 상태에서 앱 시작 후 메인화면으로 넘어가는 초기 진입이 느립니다. 저장된 세션 복원, refresh token 갱신, `/user/me`/경제 상태/이미지 preload가 직렬로 묶여 있는지 확인하고, 화면 진입에 필수인 작업과 백그라운드 동기화로 미룰 작업을 분리해야 합니다.
-- 친구 방 서버 조회는 현재 서버 `RoomView`에 캐릭터 이름/XP/상태가 없어 방 가구/벽지만 서버 값으로 매핑하고, 부 이름/XP/상태는 fallback을 사용합니다. 백엔드가 캐릭터 정보를 같이 내려주면 매핑을 확장해야 합니다.
-- 마이룸 내 방(`/rooms/me`) 조회 결과를 앱 시작/마이룸 진입 시 로컬 `equippedRoomItems`, `equippedRoomWallpaper`, owned 목록에 반영하는 동기화가 아직 제한적입니다. 현재는 상점 목록과 구매/장착 흐름 중심으로 맞춰져 있습니다.
+- `/minigames/ranking/me`는 개인 요약용이고 game type/mode query parameter가 없습니다. 전공책 받기/부 잡기/무한모드별 목록은 `/minigames/rankings`, `/minigames/rankings/friends`를 사용해야 합니다.
+- 자동 로그인 상태에서 앱 시작 후 메인화면으로 넘어가기 전 `syncServerUserStats`를 수행합니다. 정확도는 좋아졌지만 서버 응답이 느리면 초기 진입이 늦어질 수 있으므로 timeout/background sync 분리가 추후 개선 후보입니다.
+- 친구 방 서버 조회는 서버 `RoomView.character`의 캐릭터 이름/XP/상태를 사용합니다. 값이 없으면 fallback을 사용합니다.
+- 마이룸 내 방(`/rooms/me`) 조회 결과는 앱 시작/마이룸 진입 시 `syncServerRoomState`와 room 화면 query로 로컬 `equippedRoomItems`, `equippedRoomWallpaper`, owned 목록에 반영합니다. 서버 shop item 이름/image와 로컬 asset id 매칭은 여전히 문자열 normalize 기반입니다.
 - 서버 shop item 이름/image와 로컬 `RoomData` id/label 매칭은 문자열 normalize 기반입니다. 백엔드 item key를 로컬 asset id와 1:1로 내려주면 매칭 안정성이 좋아집니다.
 - 더미 파일 자체(`FriendListDummyData`, `RoomGuestbookDummyData`, 로컬 `MealMenuData`, 로컬 `QuizData`)는 비로그인/개발 fallback 용도로 남아 있습니다. 실제 배포에서 비로그인 플레이를 허용하지 않을 경우 제거 범위를 다시 결정해야 합니다.
 - 기존 사용자 AsyncStorage에 저장된 `friendList` 더미 값은 persist 때문에 남아 있을 수 있습니다. 로그인 상태 화면에서는 더미를 표시하지 않도록 막았지만, 필요하면 마이그레이션으로 persisted `friendList` 정리가 필요합니다.
-- 친구 방명록 작성은 서버 요청을 보내고 로컬 fallback 추가는 비로그인일 때만 수행하도록 정리했습니다. 작성 성공 후 방명록 목록 refetch는 아직 연결되지 않았습니다.
+- 방명록 목록은 서버 `GuestbookPage.items`를 사용하고, 수정/삭제 후 관련 React Query 캐시를 invalidate합니다. 친구 방명록 작성은 서버 요청을 보내고 로컬 fallback 추가는 비로그인일 때만 수행합니다.
 
 ## Dependency Layers
 실제 import를 기준으로 보면 현재 핵심 흐름은 아래 방향입니다.
@@ -238,14 +271,14 @@
 - `[hooks]`: `useHook/useTodayMeal.ts`
 - `[shared UI]`: `components/MainButton`, `components/SquareButton`, `components/CoinBox`, `components/ProgressBar`, `components/TopAlert`, `components/Character`, `components/BooChat`, `components/LoadingOverlay`
 - `[feature panels]`: `components/MealPanel`, `components/QuizPanel`, `components/DeveloperPanel`, `components/FriendPanel`, `components/FriendList`, `components/MyProfile`, `components/Options`, `components/SoundSettings`, `components/TutorialPanel`, `components/MiniGame`, `components/Room/RoomScene`, `components/Room/RoomMiniBoo`, `components/Room/GuestbookModal`, `components/Room/GuestbookListModal`
-- `[routes]`: `app/_layout.tsx`, `app/index.tsx`, `app/game/index.tsx`, `app/miniGame/index.tsx`, `app/miniGame/catchTheMajor.tsx`, `app/miniGame/catchTheMajorPlay.tsx`, `app/miniGame/catchBoo.tsx`, `app/miniGame/freeThrow.tsx`, `app/room/index.tsx`, `app/room/[friendId].tsx`
+- `[routes]`: `app/_layout.tsx`, `app/index.tsx`, `app/game/index.tsx`, `app/miniGame/index.tsx`, `app/miniGame/catchTheMajor.tsx`, `app/miniGame/catchTheMajorPlay.tsx`, `app/miniGame/catchBoo.tsx`, `app/miniGame/catchBooPlay.tsx`, `app/miniGame/freeThrow.tsx`, `app/miniGame/freeThrowPlay.tsx`, `app/room/index.tsx`, `app/room/[friendId].tsx`
 
 확인된 예외/특징:
 - `stores/useGameStore.ts`는 `components/MealPanel/MealMenuData.ts`, `components/QuizPanel/QuizData.ts`, `components/Room/RoomData.ts`를 import합니다. 이 파일들은 UI 컴포넌트라기보다 도메인 데이터/정책 registry 역할을 합니다.
 - `utils/getTodayMeal.ts`는 학식 section 타입을 쓰기 위해 `components/MealPanel/MealMenuData.ts`를 import합니다.
 - `components/MiniGame/MiniGameData.ts`는 UI 컴포넌트가 아니라 미니게임 장소/시작 화면/하트/이미지 preload registry 역할도 합니다.
 - `routes`는 대부분의 feature panel과 shared UI를 import하지만, 반대로 하위 레이어에서 `app/*`를 import하는 흐름은 확인되지 않았습니다.
-- 상위 화면(`app/game/index.tsx`, `app/miniGame/index.tsx`, `app/miniGame/catchTheMajorPlay.tsx`, `app/room/index.tsx`)은 여러 feature를 조율하는 orchestration 레이어입니다. 이 레이어의 로직을 하위 컴포넌트로 옮길 때는 store/timer/audio/router/animation 의존이 같이 이동하는지 확인해야 합니다.
+- 상위 화면(`app/game/index.tsx`, `app/miniGame/index.tsx`, `app/miniGame/catchTheMajorPlay.tsx`, `app/miniGame/catchBooPlay.tsx`, `app/miniGame/freeThrowPlay.tsx`, `app/room/index.tsx`)은 여러 feature를 조율하는 orchestration 레이어입니다. 이 레이어의 로직을 하위 컴포넌트로 옮길 때는 store/timer/audio/router/animation/API 세션 의존이 같이 이동하는지 확인해야 합니다.
 
 ## File Dependency Map
 핵심 파일 기준으로 정리했습니다. 아래 목록은 실제 import와 확인된 호출 흐름만 반영합니다.
@@ -278,17 +311,27 @@
 `app/miniGame/catchBoo.tsx`:
   @depends: [`components/MiniGame/MiniGameStartScreen.tsx`]
   @used-by: [`expo-router/entry`, `app/miniGame/index.tsx`]
-  @side-effects: MiniGameStartScreen에 `catchBoo` 설정 전달. 실제 플레이는 준비 중 알림 처리
+  @side-effects: MiniGameStartScreen에 `catchBoo` 설정 전달. 시작 버튼은 `/miniGame/catchBooPlay`로 이동
 
 `app/miniGame/freeThrow.tsx`:
   @depends: [`components/MiniGame/MiniGameStartScreen.tsx`]
   @used-by: [`expo-router/entry`, `app/miniGame/index.tsx`]
-  @side-effects: MiniGameStartScreen에 `freeThrow` 설정 전달. 실제 플레이는 준비 중 알림 처리
+  @side-effects: MiniGameStartScreen에 `freeThrow` 설정 전달. 시작 버튼은 `/miniGame/freeThrowPlay`로 이동
 
 `app/miniGame/catchTheMajorPlay.tsx`:
   @depends: [`assets/icons/arrow-back-return.svg`, `assets/icons/cross.svg`, `assets/icons/heart-filled.svg`, `assets/icons/heart-white.svg`, `assets/icons/hourglass-time.svg`, `assets/miniGame/book-catch/*`, `components/FriendList/FriendListDummyData.ts`, `components/MainButton/MainButton.tsx`, `components/MiniGame/MiniGameData.ts`, `components/OutlinedText/OutlinedText.tsx`, `components/SquareButton/SquareButton.tsx`, `components/TopAlert/TopAlert.tsx`, `constants/character.ts`, `constants/colors.ts`, `constants/fonts.ts`, `stores/useGameStore.ts`, `utils/backgroundMusic.ts`, `utils/soundEffects.ts`, `utils/xpProgress.ts`]
   @used-by: [`expo-router/entry`, `components/MiniGame/MiniGameStartScreen.tsx`]
   @side-effects: miniGameIngame BGM 세션 시작, book-catch 이미지 preload, Reanimated animation/frame callback 관리, 일반모드 성공 시 coin 변경, SFX/haptic 재생, router 이동
+
+`app/miniGame/catchBooPlay.tsx`:
+  @depends: [`assets/icons/arrow-back-return.svg`, `assets/icons/cross.svg`, `assets/icons/hourglass-time.svg`, `assets/miniGame/boo-catch/*`, `assets/places/lawn-plaza.png`, `components/MainButton/MainButton.tsx`, `components/MiniGame/MiniGameData.ts`, `components/OutlinedText/OutlinedText.tsx`, `components/SquareButton/SquareButton.tsx`, `components/TopAlert/TopAlert.tsx`, `stores/useGameStore.ts`, `utils/backgroundMusic.ts`, `utils/serverApi.ts`, `utils/soundEffects.ts`]
+  @used-by: [`expo-router/entry`, `components/MiniGame/MiniGameStartScreen.tsx`]
+  @side-effects: miniGameIngame BGM 세션 시작, boo-catch 이미지 preload, 서버 미니게임 세션 시작/보상/결과 저장, SFX/haptic 재생, router 이동
+
+`app/miniGame/freeThrowPlay.tsx`:
+  @depends: [`assets/icons/arrow-back-return.svg`, `assets/icons/cross.svg`, `assets/miniGame/basketball/*`, `assets/places/obama-hall.png`, `components/MainButton/MainButton.tsx`, `components/MiniGame/freeThrow/freeThrowPhysics.ts`, `components/SquareButton/SquareButton.tsx`, `components/TopAlert/TopAlert.tsx`, `stores/useGameStore.ts`, `utils/backgroundMusic.ts`, `utils/serverApi.ts`, `utils/soundEffects.ts`]
+  @used-by: [`expo-router/entry`, `components/MiniGame/MiniGameStartScreen.tsx`]
+  @side-effects: miniGameIngame BGM 세션 시작, 게이지/공/골대 애니메이션, 서버 미니게임 세션 시작/보상 동기화, router 이동
 
 `app/room/index.tsx`:
   @depends: [`stores/useGameStore.ts`, `components/Room/RoomData.ts`, `components/Room/RoomScene.tsx`, `components/Room/GuestbookListModal.tsx`, `components/CoinBox/CoinBox.tsx`, `components/ProgressBar/ProgressBar.tsx`, `components/SquareButton/SquareButton.tsx`, `utils/backgroundMusic.ts`, `utils/soundEffects.ts`, `utils/xpProgress.ts`]
@@ -436,9 +479,9 @@
   @side-effects: preloadLoadingOverlayAssets 호출 시 로딩 오버레이 이미지 캐시 preload
 
 `components/DeveloperPanel/DeveloperPanel.tsx`:
-  @depends: [`stores/useGameStore.ts`, `components/MainButton/MainButton.tsx`, `components/MealPanel/MealMenuData.ts`, `constants/character.ts`, `utils/xpProgress.ts`]
+  @depends: [`stores/useGameStore.ts`, `components/MainButton/MainButton.tsx`, `components/MealPanel/MealMenuData.ts`, `constants/character.ts`, `utils/serverApi.ts`, `utils/xpProgress.ts`]
   @used-by: [`app/game/index.tsx`]
-  @side-effects: 다수의 Zustand 디버그 액션 호출, 입력 validation 상태 관리
+  @side-effects: 다수의 Zustand 디버그 액션 호출, 부 상태 서버 동기화 요청, 입력 validation 상태 관리
 
 `components/TutorialPanel/TutorialPanel.tsx`:
   @depends: [`components/TutorialPanel/TutorialData.ts`, `utils/soundEffects.ts`]

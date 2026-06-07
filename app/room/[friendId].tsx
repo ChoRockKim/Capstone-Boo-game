@@ -18,6 +18,7 @@ import RoomScene from "@/components/Room/RoomScene";
 import SquareButton from "@/components/SquareButton/SquareButton";
 import { colors } from "@/constants/colors";
 import { fonts } from "@/constants/fonts";
+import { CharacterState } from "@/constants/character";
 import { useGameStore } from "@/stores/useGameStore";
 import { useRequirePlayableSession } from "@/useHook/useRequirePlayableSession";
 import { startBackgroundMusicSession } from "@/utils/backgroundMusic";
@@ -42,6 +43,23 @@ import {
 const ROOM_MAX_WIDTH = 600;
 const PROGRESS_BOTTOM_OFFSET = 38;
 const ROOM_VERTICAL_RESERVED_SPACE = 220;
+const CHARACTER_STATES: CharacterState[] = [
+  "basic1",
+  "basic2",
+  "happy1",
+  "happy2",
+  "hungry",
+  "eating",
+  "talking",
+];
+
+const getServerCharacterState = (
+  state: string | null | undefined,
+): CharacterState => {
+  return CHARACTER_STATES.includes(state as CharacterState)
+    ? (state as CharacterState)
+    : "basic1";
+};
 
 const FriendRoomIndex = () => {
   const insets = useSafeAreaInsets();
@@ -64,15 +82,18 @@ const FriendRoomIndex = () => {
   const accessToken = useGameStore((state) => state.accessToken);
   const addGuestbookEntry = useGameStore((state) => state.addGuestbookEntry);
   const friendList = useGameStore((state) => state.friendList);
+  const isGuestMode = useGameStore((state) => state.isGuestMode);
   const queryClient = useQueryClient();
   const [isGuestbookOpen, setIsGuestbookOpen] = useState(false);
 
   const friend = useMemo(
     () =>
-      friendList.find((item) => item.id === friendId) ??
-      FRIEND_DIRECTORY_DUMMY_DATA.find((item) => item.id === friendId) ??
-      null,
-    [friendId, friendList],
+      isGuestMode
+        ? null
+        : friendList.find((item) => item.id === friendId) ??
+          FRIEND_DIRECTORY_DUMMY_DATA.find((item) => item.id === friendId) ??
+          null,
+    [friendId, friendList, isGuestMode],
   );
   const parsedFriendUserId = Number(friendUserIdParam);
   const serverUserIdFromFriendId =
@@ -93,11 +114,14 @@ const FriendRoomIndex = () => {
   const roomSnapshot = serverRoom
     ? {
         ...mapServerRoomViewToLocalRoomState(serverRoom),
-        booName: `${displayFriendName}의 부`,
-        characterState: "basic1" as const,
-        totalXp: 0,
+        booName:
+          serverRoom.character?.character_name?.trim() ||
+          `${displayFriendName}의 부`,
+        characterState: getServerCharacterState(serverRoom.character?.state),
+        totalXp:
+          serverRoom.character?.xp_point ?? serverRoom.owner.xp_point ?? 0,
       }
-    : friend && !accessToken
+    : friend && !accessToken && !isGuestMode
       ? getFriendRoomSnapshot(friend)
       : null;
   const xpProgress = useMemo(
@@ -131,7 +155,7 @@ const FriendRoomIndex = () => {
   };
 
   const handleGuestbookSubmit = async (message: string) => {
-    if (!friendId) {
+    if (!friendId || isGuestMode) {
       return;
     }
 
@@ -201,6 +225,8 @@ const FriendRoomIndex = () => {
             <Text style={styles.emptyText}>
               {accessToken && serverUserId !== null
                 ? "친구 방 정보를 불러오고 있어요."
+                : isGuestMode
+                  ? "게스트 모드에서는 친구 방을 사용할 수 없어요."
                 : "친구 방 정보를 찾을 수 없어요."}
             </Text>
           </View>

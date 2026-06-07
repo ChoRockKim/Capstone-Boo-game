@@ -10,12 +10,11 @@ import {
 } from "@/components/FriendList/FriendListDummyData";
 import { useGameStore } from "@/stores/useGameStore";
 import {
-  addServerFriend,
+  createFriendRequest,
   getServerApiErrorMessage,
   searchFriendByStudentId,
 } from "@/utils/serverApi";
 import {
-  mapFriendOutToFriendListItem,
   mapFriendUserToFriendListItem,
 } from "@/utils/serverFriendAdapter";
 import { playSoundEffect } from "@/utils/soundEffects";
@@ -59,6 +58,7 @@ const FriendAddModal = ({ onClose, onFriendChanged }: FriendAddModalProps) => {
   const [isLookingUp, setIsLookingUp] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [lookupResult, setLookupResult] = useState<FriendListItem | null>(null);
+  const [successMessage, setSuccessMessage] = useState("추가되었습니다!");
   const [studentIdInput, setStudentIdInput] = useState("");
 
   const trimmedStudentId = useMemo(
@@ -168,16 +168,17 @@ const FriendAddModal = ({ onClose, onFriendChanged }: FriendAddModalProps) => {
       setIsAddingFriend(true);
 
       try {
-        const addedFriend = mapFriendOutToFriendListItem(
-          await addServerFriend(lookupResult.studentId, accessToken),
+        await createFriendRequest(
+          lookupResult.studentId,
+          accessToken,
         );
 
-        addFriend(addedFriend);
         onFriendChanged?.();
+        setSuccessMessage("친구 요청을 보냈어요!");
         setFriendAddStep("success");
       } catch (error) {
         setErrorMessage(
-          getServerApiErrorMessage(error, "친구 추가에 실패했어요."),
+          getServerApiErrorMessage(error, "친구 요청에 실패했어요."),
         );
       } finally {
         setIsAddingFriend(false);
@@ -187,6 +188,7 @@ const FriendAddModal = ({ onClose, onFriendChanged }: FriendAddModalProps) => {
     }
 
     addFriend(lookupResult);
+    setSuccessMessage("추가되었습니다!");
     setFriendAddStep("success");
   };
 
@@ -208,7 +210,7 @@ const FriendAddModal = ({ onClose, onFriendChanged }: FriendAddModalProps) => {
     if (friendAddStep === "success") {
       return (
         <>
-          <Text style={styles.messageText}>추가되었습니다!</Text>
+          <Text style={styles.messageText}>{successMessage}</Text>
           <View style={styles.buttonWrapper}>
             <MainButton
               color="blue"

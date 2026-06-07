@@ -13,10 +13,23 @@ import { playSoundEffect } from "@/utils/soundEffects";
 import { Feather } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { useMemo, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import {
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
 
 interface GuestbookListModalProps {
   entries?: RoomGuestbookListEntry[];
+  onActionError?: (title: string, message: string) => void;
+  onDeleteEntry?: (entry: RoomGuestbookListEntry) => Promise<void> | void;
+  onUpdateEntry?: (
+    entry: RoomGuestbookListEntry,
+    message: string,
+  ) => Promise<void> | void;
   onClose: () => void;
 }
 
@@ -24,12 +37,31 @@ const INITIAL_VISIBLE_ENTRY_COUNT = 4;
 
 const GuestbookListModal = ({
   entries = [],
+  onActionError,
+  onDeleteEntry,
+  onUpdateEntry,
   onClose,
 }: GuestbookListModalProps) => {
-  const [guestbookEntries, setGuestbookEntries] = useState(entries);
+  const [deletedEntryIds, setDeletedEntryIds] = useState<string[]>([]);
+  const [editedMessagesById, setEditedMessagesById] = useState<
+    Record<string, string>
+  >({});
+  const [editingMessage, setEditingMessage] = useState("");
   const [isExpanded, setIsExpanded] = useState(false);
+  const [isEditingEntry, setIsEditingEntry] = useState(false);
+  const [isSubmittingEntryAction, setIsSubmittingEntryAction] = useState(false);
   const [selectedEntry, setSelectedEntry] =
     useState<RoomGuestbookListEntry | null>(null);
+  const guestbookEntries = useMemo(
+    () =>
+      entries
+        .filter((entry) => !deletedEntryIds.includes(entry.id))
+        .map((entry) => ({
+          ...entry,
+          message: editedMessagesById[entry.id] ?? entry.message,
+        })),
+    [deletedEntryIds, editedMessagesById, entries],
+  );
   const visibleEntries = useMemo(
     () =>
       isExpanded
@@ -48,23 +80,102 @@ const GuestbookListModal = ({
   const handleEntryPress = (entry: RoomGuestbookListEntry) => {
     playSoundEffect("basicClick");
     setSelectedEntry(entry);
+    setEditingMessage(entry.message);
+    setIsEditingEntry(false);
   };
 
   const handleDetailClose = () => {
     playSoundEffect("basicClick");
     setSelectedEntry(null);
+    setIsEditingEntry(false);
+    setEditingMessage("");
   };
 
-  const handleDeletePress = () => {
+  const handleEditPress = () => {
     if (!selectedEntry) {
       return;
     }
 
     playSoundEffect("basicClick");
-    setGuestbookEntries((currentEntries) =>
-      currentEntries.filter((entry) => entry.id !== selectedEntry.id),
-    );
-    setSelectedEntry(null);
+    setEditingMessage(selectedEntry.message);
+    setIsEditingEntry(true);
+  };
+
+  const handleEditCancelPress = () => {
+    if (!selectedEntry) {
+      return;
+    }
+
+    playSoundEffect("basicClick");
+    setEditingMessage(selectedEntry.message);
+    setIsEditingEntry(false);
+  };
+
+  const handleEditSavePress = async () => {
+    if (!selectedEntry || isSubmittingEntryAction) {
+      return;
+    }
+
+    const trimmedMessage = editingMessage.trim().slice(0, 15);
+
+    if (!trimmedMessage) {
+      return;
+    }
+
+    playSoundEffect("basicClick");
+    setIsSubmittingEntryAction(true);
+
+    try {
+      await onUpdateEntry?.(selectedEntry, trimmedMessage);
+      setEditedMessagesById((currentMessages) => ({
+        ...currentMessages,
+        [selectedEntry.id]: trimmedMessage,
+      }));
+      setSelectedEntry({
+        ...selectedEntry,
+        message: trimmedMessage,
+      });
+      setIsEditingEntry(false);
+    } catch (error) {
+      console.warn("방명록 수정 실패", error);
+      onActionError?.(
+        "방명록 수정 실패",
+        error instanceof Error
+          ? error.message
+          : "방명록을 수정하지 못했어요.",
+      );
+    } finally {
+      setIsSubmittingEntryAction(false);
+    }
+  };
+
+  const handleDeletePress = async () => {
+    if (!selectedEntry || isSubmittingEntryAction) {
+      return;
+    }
+
+    playSoundEffect("basicClick");
+    const entryToDelete = selectedEntry;
+    setIsSubmittingEntryAction(true);
+
+    try {
+      await onDeleteEntry?.(entryToDelete);
+      setDeletedEntryIds((currentIds) => [
+        ...currentIds,
+        entryToDelete.id,
+      ]);
+      setSelectedEntry(null);
+    } catch (error) {
+      console.warn("방명록 삭제 실패", error);
+      onActionError?.(
+        "방명록 삭제 실패",
+        error instanceof Error
+          ? error.message
+          : "방명록을 삭제하지 못했어요.",
+      );
+    } finally {
+      setIsSubmittingEntryAction(false);
+    }
   };
 
   const handleVisitPress = () => {
@@ -164,29 +275,81 @@ const GuestbookListModal = ({
                 <CrossIcon width={24} height={24} fill={colors.BLACK_NORMAL} />
               </Pressable>
             </View>
-            <Text style={styles.detailMessageText}>{selectedEntry.message}</Text>
+            {isEditingEntry ? (
+              <TextInput
+                maxLength={15}
+                onChangeText={setEditingMessage}
+                style={styles.editInput}
+                value={editingMessage}
+              />
+            ) : (
+              <Text style={styles.detailMessageText}>
+                {selectedEntry.message}
+              </Text>
+            )}
             <Text style={styles.detailAuthorText}>{selectedEntry.authorName}</Text>
             <View style={styles.detailActionRow}>
-              <Pressable
-                onPress={handleDeletePress}
-                style={({ pressed }) => [
-                  styles.detailActionButton,
-                  styles.deleteButton,
-                  pressed && styles.detailActionButtonPressed,
-                ]}
-              >
-                <Text style={styles.deleteButtonText}>삭제</Text>
-              </Pressable>
-              <Pressable
-                onPress={handleVisitPress}
-                style={({ pressed }) => [
-                  styles.detailActionButton,
-                  styles.visitButton,
-                  pressed && styles.detailActionButtonPressed,
-                ]}
-              >
-                <Text style={styles.visitButtonText}>방문</Text>
-              </Pressable>
+              {isEditingEntry ? (
+                <>
+                  <Pressable
+                    onPress={handleEditCancelPress}
+                    style={({ pressed }) => [
+                      styles.detailActionButton,
+                      styles.deleteButton,
+                      pressed && styles.detailActionButtonPressed,
+                    ]}
+                  >
+                    <Text style={styles.deleteButtonText}>취소</Text>
+                  </Pressable>
+                  <Pressable
+                    disabled={isSubmittingEntryAction}
+                    onPress={handleEditSavePress}
+                    style={({ pressed }) => [
+                      styles.detailActionButton,
+                      styles.visitButton,
+                      isSubmittingEntryAction && styles.detailActionButtonDisabled,
+                      pressed && styles.detailActionButtonPressed,
+                    ]}
+                  >
+                    <Text style={styles.visitButtonText}>저장</Text>
+                  </Pressable>
+                </>
+              ) : (
+                <>
+                  <Pressable
+                    onPress={handleEditPress}
+                    style={({ pressed }) => [
+                      styles.detailActionButton,
+                      styles.editButton,
+                      pressed && styles.detailActionButtonPressed,
+                    ]}
+                  >
+                    <Text style={styles.editButtonText}>수정</Text>
+                  </Pressable>
+                  <Pressable
+                    disabled={isSubmittingEntryAction}
+                    onPress={handleDeletePress}
+                    style={({ pressed }) => [
+                      styles.detailActionButton,
+                      styles.deleteButton,
+                      isSubmittingEntryAction && styles.detailActionButtonDisabled,
+                      pressed && styles.detailActionButtonPressed,
+                    ]}
+                  >
+                    <Text style={styles.deleteButtonText}>삭제</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={handleVisitPress}
+                    style={({ pressed }) => [
+                      styles.detailActionButton,
+                      styles.visitButton,
+                      pressed && styles.detailActionButtonPressed,
+                    ]}
+                  >
+                    <Text style={styles.visitButtonText}>방문</Text>
+                  </Pressable>
+                </>
+              )}
             </View>
           </View>
         </View>
@@ -366,6 +529,17 @@ const styles = StyleSheet.create({
     includeFontPadding: false,
     lineHeight: 30,
   },
+  editInput: {
+    minHeight: 46,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: colors.BLACK_NORMAL,
+    color: colors.BLACK_NORMAL,
+    fontFamily: fonts.BASIC,
+    fontSize: 20,
+    includeFontPadding: false,
+    lineHeight: 26,
+  },
   detailAuthorText: {
     color: colors.GREEN_NORMAL,
     fontFamily: fonts.BASIC,
@@ -390,8 +564,14 @@ const styles = StyleSheet.create({
   detailActionButtonPressed: {
     opacity: 0.78,
   },
+  detailActionButtonDisabled: {
+    opacity: 0.55,
+  },
   deleteButton: {
     backgroundColor: colors.WHITE_NORMAL,
+  },
+  editButton: {
+    backgroundColor: colors.GOLD_LIGHT_ACTIVE,
   },
   visitButton: {
     backgroundColor: colors.GREEN_NORMAL,
@@ -405,6 +585,13 @@ const styles = StyleSheet.create({
   },
   visitButtonText: {
     color: colors.WHITE_NORMAL,
+    fontFamily: fonts.BASIC,
+    fontSize: 20,
+    includeFontPadding: false,
+    lineHeight: 28,
+  },
+  editButtonText: {
+    color: colors.BLACK_NORMAL,
     fontFamily: fonts.BASIC,
     fontSize: 20,
     includeFontPadding: false,

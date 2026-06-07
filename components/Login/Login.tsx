@@ -7,7 +7,9 @@ import {
   getServerApiErrorMessage,
   loginUser,
   requestPasswordReset,
+  sendAchievementEvent,
 } from "@/utils/serverApi";
+import { syncServerUserStats } from "@/utils/syncServerUserStats";
 import { playSoundEffect } from "@/utils/soundEffects";
 import { router } from "expo-router";
 import React, { useCallback, useEffect, useState } from "react";
@@ -83,6 +85,9 @@ const Login = ({ setIsLoginOpen }: RegisterProps) => {
   });
   const clearAuthSession = useGameStore((state) => state.clearAuthSession);
   const setAuthSession = useGameStore((state) => state.setAuthSession);
+  const applyServerUnlockedAchievements = useGameStore(
+    (state) => state.applyServerUnlockedAchievements,
+  );
   const buttonWidth = width - 56;
   const loginForm = useForm<LoginValues>({
     defaultValues: {
@@ -161,8 +166,24 @@ const Login = ({ setIsLoginOpen }: RegisterProps) => {
         accessToken: token.access_token,
         autoLoginEnabled: isAutoLoginEnabled,
         refreshToken: token.refresh_token,
+        unlockedAchievements: token.unlocked_achievements,
       });
       didSetAuthSession = true;
+
+      await sendAchievementEvent("first_login", token.access_token)
+        .then((result) => {
+          applyServerUnlockedAchievements(result.unlocked_achievements, {
+            coin: result.coin,
+            totalXp: result.xp_point,
+          });
+        })
+        .catch((error) => {
+          console.warn("서버 로그인 업적 동기화 실패", error);
+        });
+
+      await syncServerUserStats(token.access_token).catch((error) => {
+        console.warn("로그인 직후 서버 유저 동기화 실패", error);
+      });
 
       setIsLoginOpen(false);
       Keyboard.dismiss();
@@ -283,9 +304,7 @@ const Login = ({ setIsLoginOpen }: RegisterProps) => {
     }
   };
 
-  const onError = () => {
-    console.log("로그인 정보를 확인해주세요.");
-  };
+  const onError = () => undefined;
 
   useEffect(() => {
     const show = Keyboard.addListener(KEYBOARD_SHOW_EVENT, (e) => {

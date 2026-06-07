@@ -3,7 +3,8 @@ import CrossIcon from "@/assets/icons/cross.svg";
 import { colors } from "@/constants/colors";
 import { fonts } from "@/constants/fonts";
 import { useGameStore } from "@/stores/useGameStore";
-import React from "react";
+import { updateCurrentUserPreferences } from "@/utils/serverApi";
+import React, { useEffect, useRef } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import SoundSlider from "../Options/SoundSlider";
 
@@ -17,11 +18,41 @@ const SoundSettings = ({
   setIsSoundSettingsOpen,
 }: SoundSettingsProps) => {
   const masterVolume = useGameStore((state) => state.masterVolume);
+  const accessToken = useGameStore((state) => state.accessToken);
   const bgmVolume = useGameStore((state) => state.bgmVolume);
   const sfxVolume = useGameStore((state) => state.sfxVolume);
   const setMasterVolume = useGameStore((state) => state.setMasterVolume);
   const setBgmVolume = useGameStore((state) => state.setBgmVolume);
   const setSfxVolume = useGameStore((state) => state.setSfxVolume);
+  const didMountRef = useRef(false);
+
+  useEffect(() => {
+    if (!accessToken) {
+      return undefined;
+    }
+
+    if (!didMountRef.current) {
+      didMountRef.current = true;
+      return undefined;
+    }
+
+    const saveTimer = setTimeout(() => {
+      void updateCurrentUserPreferences(
+        {
+          bgm_volume: bgmVolume,
+          master_volume: masterVolume,
+          sfx_volume: sfxVolume,
+        },
+        accessToken,
+      ).catch((error) => {
+        console.warn("서버 사운드 설정 저장 실패", error);
+      });
+    }, 600);
+
+    return () => {
+      clearTimeout(saveTimer);
+    };
+  }, [accessToken, bgmVolume, masterVolume, sfxVolume]);
 
   const handleBackPress = () => {
     setIsSoundSettingsOpen(false);

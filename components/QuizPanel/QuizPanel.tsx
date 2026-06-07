@@ -341,35 +341,89 @@ function QuizPanel({ onQuizResultAlert, setIsQuizOpen }: QuizPanelProps) {
       accessToken &&
       typeof activeQuestion.serverQuizId === "number"
     ) {
-      const canOptimisticallyGrade = activeQuestion.answer.trim().length > 0;
-      const rollbackState = useGameStore.getState();
-      const optimisticIsCorrect = canOptimisticallyGrade
-        ? isQuizAnswerCorrect(activeQuestion, selectedAnswer)
-        : false;
+      const hasServerAnswer = activeQuestion.answer.trim().length > 0;
 
-      if (canOptimisticallyGrade) {
-        const optimisticXpDelta = optimisticIsCorrect
-          ? QUIZ_CORRECT_XP_REWARD
-          : -QUIZ_WRONG_XP_PENALTY;
+      if (!hasServerAnswer) {
+        setIsSubmittingAnswer(true);
 
-        applyServerQuizSubmit({
-          coin: optimisticIsCorrect
-            ? rollbackState.coin + QUIZ_CORRECT_COIN_REWARD
-            : rollbackState.coin,
-          isCorrect: optimisticIsCorrect,
-          totalXp: Math.max(rollbackState.totalXp + optimisticXpDelta, 0),
-        });
-        setResultState({
-          answerLabel: getQuizAnswerLabel(activeQuestion),
-          coinDelta: optimisticIsCorrect ? QUIZ_CORRECT_COIN_REWARD : 0,
-          description: optimisticIsCorrect
-            ? "정답입니다!"
-            : "아쉽지만 오답이에요.",
-          isCorrect: optimisticIsCorrect,
-          xpDelta: optimisticXpDelta,
-        });
-        onQuizResultAlert(optimisticIsCorrect);
+        try {
+          const submitResult = await submitQuizAnswer(
+            {
+              answer: selectedAnswer,
+              quiz_id: activeQuestion.serverQuizId,
+            },
+            accessToken,
+          );
+
+          applyServerQuizSubmit({
+            coin: submitResult.coin,
+            isCorrect: submitResult.correct,
+            totalXp: submitResult.xp_point,
+            unlockedAchievements: submitResult.unlocked_achievements,
+          });
+          setResultState({
+            answerLabel: submitResult.correct_answer,
+            coinDelta: submitResult.awarded_coin,
+            description:
+              submitResult.detail ||
+              (submitResult.correct ? "정답입니다!" : "아쉽지만 오답이에요."),
+            isCorrect: submitResult.correct,
+            xpDelta: submitResult.awarded_points,
+          });
+          onQuizResultAlert(submitResult.correct);
+
+          await Promise.all([
+            refetchServerQuizStatus(),
+            refetchServerNextQuiz(),
+            refetchServerAvailableQuizzes(),
+          ]);
+        } catch (error) {
+          setCurrentQuestion(null);
+          setSelectedAnswer(null);
+          setResultState({
+            answerLabel: "",
+            coinDelta: 0,
+            description: getServerApiErrorMessage(
+              error,
+              "퀴즈 제출에 실패했어요.",
+            ),
+            isCorrect: false,
+            xpDelta: 0,
+          });
+        } finally {
+          setIsSubmittingAnswer(false);
+        }
+
+        return;
       }
+
+      const rollbackState = useGameStore.getState();
+      const optimisticIsCorrect = isQuizAnswerCorrect(
+        activeQuestion,
+        selectedAnswer,
+      );
+      const optimisticXpDelta = optimisticIsCorrect
+        ? QUIZ_CORRECT_XP_REWARD
+        : -QUIZ_WRONG_XP_PENALTY;
+
+      applyServerQuizSubmit({
+        coin: optimisticIsCorrect
+          ? rollbackState.coin + QUIZ_CORRECT_COIN_REWARD
+          : rollbackState.coin,
+        isCorrect: optimisticIsCorrect,
+        totalXp: Math.max(rollbackState.totalXp + optimisticXpDelta, 0),
+      });
+      setResultState({
+        answerLabel: getQuizAnswerLabel(activeQuestion),
+        coinDelta: optimisticIsCorrect ? QUIZ_CORRECT_COIN_REWARD : 0,
+        description: optimisticIsCorrect
+          ? "정답입니다!"
+          : "아쉽지만 오답이에요.",
+        isCorrect: optimisticIsCorrect,
+        xpDelta: optimisticXpDelta,
+      });
+      onQuizResultAlert(optimisticIsCorrect);
+
       const optimisticState = useGameStore.getState();
       const optimisticCoinBase =
         rollbackState.coin +
@@ -381,12 +435,14 @@ function QuizPanel({ onQuizResultAlert, setIsQuizOpen }: QuizPanelProps) {
             : -QUIZ_WRONG_XP_PENALTY),
         0,
       );
-      const optimisticAchievementCoinDelta = canOptimisticallyGrade
-        ? Math.max(optimisticState.coin - optimisticCoinBase, 0)
-        : 0;
-      const optimisticAchievementXpDelta = canOptimisticallyGrade
-        ? Math.max(optimisticState.totalXp - optimisticXpBase, 0)
-        : 0;
+      const optimisticAchievementCoinDelta = Math.max(
+        optimisticState.coin - optimisticCoinBase,
+        0,
+      );
+      const optimisticAchievementXpDelta = Math.max(
+        optimisticState.totalXp - optimisticXpBase,
+        0,
+      );
 
       setIsSubmittingAnswer(true);
 
@@ -400,7 +456,6 @@ function QuizPanel({ onQuizResultAlert, setIsQuizOpen }: QuizPanelProps) {
         );
 
         if (
-          canOptimisticallyGrade &&
           optimisticIsCorrect !== submitResult.correct
         ) {
           useGameStore.getState().setGameState({
@@ -420,18 +475,16 @@ function QuizPanel({ onQuizResultAlert, setIsQuizOpen }: QuizPanelProps) {
             (optimisticIsCorrect === submitResult.correct
               ? optimisticAchievementCoinDelta
               : 0),
-          countAchievement:
-            !canOptimisticallyGrade ||
-            optimisticIsCorrect !== submitResult.correct,
+          countAchievement: optimisticIsCorrect !== submitResult.correct,
           isCorrect: submitResult.correct,
           totalXp:
             submitResult.xp_point +
             (optimisticIsCorrect === submitResult.correct
               ? optimisticAchievementXpDelta
               : 0),
+          unlockedAchievements: submitResult.unlocked_achievements,
         });
         if (
-          !canOptimisticallyGrade ||
           optimisticIsCorrect !== submitResult.correct
         ) {
           setResultState({
@@ -451,17 +504,15 @@ function QuizPanel({ onQuizResultAlert, setIsQuizOpen }: QuizPanelProps) {
           refetchServerAvailableQuizzes(),
         ]);
       } catch (error) {
-        if (canOptimisticallyGrade) {
-          useGameStore.getState().setGameState({
-            achievementAlertQueue: rollbackState.achievementAlertQueue,
-            achievementStats: rollbackState.achievementStats,
-            coin: rollbackState.coin,
-            completedAchievementKeys: rollbackState.completedAchievementKeys,
-            ownedAchievementSkins: rollbackState.ownedAchievementSkins,
-            pendingEvolution: rollbackState.pendingEvolution,
-            totalXp: rollbackState.totalXp,
-          });
-        }
+        useGameStore.getState().setGameState({
+          achievementAlertQueue: rollbackState.achievementAlertQueue,
+          achievementStats: rollbackState.achievementStats,
+          coin: rollbackState.coin,
+          completedAchievementKeys: rollbackState.completedAchievementKeys,
+          ownedAchievementSkins: rollbackState.ownedAchievementSkins,
+          pendingEvolution: rollbackState.pendingEvolution,
+          totalXp: rollbackState.totalXp,
+        });
         setCurrentQuestion(null);
         setSelectedAnswer(null);
         setResultState({
@@ -621,10 +672,11 @@ function QuizPanel({ onQuizResultAlert, setIsQuizOpen }: QuizPanelProps) {
         ) : null}
         {resultState ? (
           <Text style={styles.helperText}>
-            정답: {resultState.answerLabel}
-            {resultState.isCorrect
-              ? `  /  XP +${resultState.xpDelta}  /  코인 +${resultState.coinDelta}`
-              : `  /  XP ${resultState.xpDelta}`}
+            {`정답: ${resultState.answerLabel}${
+              resultState.isCorrect
+                ? `  /  XP +${resultState.xpDelta}  /  코인 +${resultState.coinDelta}`
+                : `  /  XP ${resultState.xpDelta}`
+            }`}
           </Text>
         ) : null}
         <View
@@ -635,7 +687,9 @@ function QuizPanel({ onQuizResultAlert, setIsQuizOpen }: QuizPanelProps) {
         >
           <MainButton
             color={
-              canSubmitAnswer || resultState || !activeQuestion
+              canSubmitAnswer ||
+              resultState ||
+              !activeQuestion
                 ? "blue"
                 : "gray"
             }

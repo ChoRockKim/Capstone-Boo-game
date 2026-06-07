@@ -13,13 +13,14 @@ import { startBackgroundMusicSession } from "@/utils/backgroundMusic";
 import { Image } from "expo-image";
 import { router, useFocusEffect } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { StyleSheet, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 export default function Index() {
   const [isRegisterOpen, setIsRegisterOpen] = useState(false);
   const [isLoginOpen, setIsLoginOpen] = useState(false);
+  const hasHandledInitialNavigationRef = useRef(false);
   const [hasHydratedStore, setHasHydratedStore] = useState(() =>
     useGameStore.persist.hasHydrated(),
   );
@@ -57,6 +58,12 @@ export default function Index() {
       if (!shouldSkipLoginScreen) {
         return undefined;
       }
+
+      if (hasHandledInitialNavigationRef.current) {
+        return undefined;
+      }
+
+      hasHandledInitialNavigationRef.current = true;
 
       router.replace("/game");
 

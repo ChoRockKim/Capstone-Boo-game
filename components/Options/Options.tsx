@@ -3,11 +3,11 @@ import CrossIcon from "@/assets/icons/cross.svg";
 import CustomizationIcon from "@/assets/icons/Customization.svg";
 import Speaker from "@/assets/icons/speaker.svg";
 import UserCircleIcon from "@/assets/icons/User-circle.svg";
+import GuestModeUnavailableModal from "@/components/GuestModeUnavailableModal/GuestModeUnavailableModal";
 import { colors } from "@/constants/colors";
 import { fonts } from "@/constants/fonts";
 import { useGameStore } from "@/stores/useGameStore";
 import {
-  deleteCharacter,
   deleteCurrentUser,
   getServerApiErrorMessage,
   logoutUser,
@@ -33,16 +33,25 @@ const Options = ({
 }: OptionsType) => {
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
+  const [isGuestFriendModalOpen, setIsGuestFriendModalOpen] = useState(false);
   const [accountErrorMessage, setAccountErrorMessage] = useState("");
   const accessToken = useGameStore((state) => state.accessToken);
   const refreshToken = useGameStore((state) => state.refreshToken);
   const isGuestMode = useGameStore((state) => state.isGuestMode);
   const clearAuthSession = useGameStore((state) => state.clearAuthSession);
-  const serverCharacterId = useGameStore((state) => state.serverCharacterId);
   const developerModeEnabled = useGameStore(
     (state) => state.developerModeEnabled,
   );
   const resetGameState = useGameStore((state) => state.resetGameState);
+  const resetGuestGameData = useGameStore(
+    (state) => state.resetGuestGameData,
+  );
+  const setHasSeenGameTutorial = useGameStore(
+    (state) => state.setHasSeenGameTutorial,
+  );
+  const setHasSeenMiniGameTutorial = useGameStore(
+    (state) => state.setHasSeenMiniGameTutorial,
+  );
   const toggleDeveloperModeEnabled = useGameStore(
     (state) => state.toggleDeveloperModeEnabled,
   );
@@ -92,6 +101,16 @@ const Options = ({
     );
   };
 
+  const handleFriendManagePress = () => {
+    if (isGuestMode) {
+      setIsGuestFriendModalOpen(true);
+      return;
+    }
+
+    setIsOptionOpen(false);
+    setIsFriendListOpen(true);
+  };
+
   const finishLocalSignOut = () => {
     clearAuthSession();
     resetGameState();
@@ -108,12 +127,6 @@ const Options = ({
     setAccountErrorMessage("");
 
     try {
-      if (serverCharacterId !== null) {
-        await deleteCharacter(serverCharacterId).catch((error) => {
-          console.warn("회원 탈퇴 전 서버 캐릭터 삭제 실패", error);
-        });
-      }
-
       await deleteCurrentUser(accessToken);
       finishLocalSignOut();
     } catch (error) {
@@ -145,7 +158,34 @@ const Options = ({
     ]);
   };
 
+  const handleTutorialReplayPress = () => {
+    setHasSeenGameTutorial(false);
+    setHasSeenMiniGameTutorial(false);
+    setIsOptionOpen(false);
+  };
+
+  const handleResetGuestDataPress = () => {
+    Alert.alert(
+      "게스트 데이터 초기화",
+      "게스트 모드의 진행 상황을 처음 상태로 되돌릴까요?",
+      [
+        {
+          text: "취소",
+          style: "cancel",
+        },
+        {
+          text: "초기화",
+          onPress: () => {
+            resetGuestGameData();
+          },
+          style: "destructive",
+        },
+      ],
+    );
+  };
+
   return (
+    <>
     <View style={styles.container}>
       <View style={styles.headerContainer}>
         <Text style={styles.headerText}>설정</Text>
@@ -175,10 +215,7 @@ const Options = ({
           label="나의 계정"
         />
         <OptionButton
-          onPress={() => {
-            setIsOptionOpen(false);
-            setIsFriendListOpen(true);
-          }}
+          onPress={handleFriendManagePress}
           icon={(pressed) => (
             <CustomizationIcon
               width={20}
@@ -207,6 +244,19 @@ const Options = ({
           label="사운드 설정"
         />
         <OptionButton
+          onPress={handleTutorialReplayPress}
+          icon={(pressed) => (
+            <Feather
+              name="book-open"
+              size={20}
+              color={
+                pressed ? colors.WHITE_NORMAL : colors.SILVER_NORMAL_ACTIVE
+              }
+            />
+          )}
+          label="튜토리얼 보기"
+        />
+        <OptionButton
           disabled={isLoggingOut}
           onPress={handleLogoutPress}
           icon={(pressed) => (
@@ -228,6 +278,20 @@ const Options = ({
                 : "로그아웃"
           }
         />
+        {isGuestMode ? (
+          <OptionButton
+            onPress={handleResetGuestDataPress}
+            icon={(pressed) => (
+              <Feather
+                name="refresh-ccw"
+                size={20}
+                color={pressed ? colors.WHITE_NORMAL : colors.DANGER}
+              />
+            )}
+            label="게스트 데이터 초기화"
+            textColor={colors.DANGER}
+          />
+        ) : null}
         {accessToken ? (
           <OptionButton
             disabled={isDeletingAccount}
@@ -276,6 +340,13 @@ const Options = ({
         </View>
       </View>
     </View>
+    {isGuestFriendModalOpen ? (
+      <GuestModeUnavailableModal
+        featureName="친구"
+        onClose={() => setIsGuestFriendModalOpen(false)}
+      />
+    ) : null}
+    </>
   );
 };
 

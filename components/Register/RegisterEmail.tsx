@@ -54,12 +54,7 @@ const RegisterEmail = ({ setStep, setIsRegisterOpen }: RegisterProps) => {
     clearErrors("email");
 
     try {
-      const result = await requestSignupEmailVerification(email);
-
-      if (result.verification_code) {
-        console.log("회원가입 인증번호:", result.verification_code);
-      }
-
+      await requestSignupEmailVerification(email);
       setStep(1);
     } catch (error) {
       setError("email", {

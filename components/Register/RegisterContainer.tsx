@@ -33,8 +33,6 @@ const RegisterContainer = ({
     reValidateMode: "onChange",
     shouldFocusError: false,
   });
-  // const email = registerForm.watch("email");
-  // console.log(email);
   return (
     <FormProvider {...registerForm}>
       <StepContext.Provider value={{ step, setStep }}>

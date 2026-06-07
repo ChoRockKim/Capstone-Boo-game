@@ -23,12 +23,17 @@ import {
   RoomWallpaperId,
 } from "@/components/Room/RoomData";
 import RoomMiniBoo from "@/components/Room/RoomMiniBoo";
-import { CharacterGrade, CharacterState } from "@/constants/character";
+import {
+  CharacterCostumeKey,
+  CharacterGrade,
+  CharacterState,
+} from "@/constants/character";
 import { Image } from "expo-image";
 import { Pressable, StyleSheet, View } from "react-native";
 
 interface RoomSceneProps {
   characterState: CharacterState;
+  characterCostumeKey?: CharacterCostumeKey;
   equippedRoomItems: EquippedRoomItems;
   grade: CharacterGrade;
   miniBooGrabbable?: boolean;
@@ -43,6 +48,7 @@ const toPercent = (value: number): `${number}%` => `${value}%` as `${number}%`;
 
 const RoomScene = ({
   characterState,
+  characterCostumeKey = "default",
   equippedRoomItems,
   grade,
   miniBooGrabbable = false,
@@ -140,6 +146,7 @@ const RoomScene = ({
       })}
       {showMiniBoo ? (
         <RoomMiniBoo
+          costumeKey={characterCostumeKey}
           grade={grade}
           grabbable={miniBooGrabbable}
           roomHeight={roomHeight}

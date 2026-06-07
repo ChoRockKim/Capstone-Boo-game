@@ -4,7 +4,10 @@ import UserCircleIcon from "@/assets/icons/User-circle.svg";
 import { colors } from "@/constants/colors";
 import { fonts } from "@/constants/fonts";
 import { useGameStore } from "@/stores/useGameStore";
-import { getServerApiErrorMessage, updateCurrentUser } from "@/utils/serverApi";
+import {
+  getServerApiErrorMessage,
+  updateCurrentUser,
+} from "@/utils/serverApi";
 import { syncServerUserStats } from "@/utils/syncServerUserStats";
 import { Feather } from "@expo/vector-icons";
 import React, { useEffect, useState } from "react";
@@ -17,12 +20,26 @@ import {
 } from "react-native";
 import ProfileButton from "./ProfileButton";
 
+type ProfileEditMode = "studentId" | "name" | "nickname" | "password";
+
 interface MyProfileType {
+  onActionAlert?: (
+    title: string,
+    message?: string,
+    options?: {
+      autoHideDuration?: number;
+      textSize?: "compact" | "default";
+    },
+  ) => void;
   setIsOptionOpen: React.Dispatch<React.SetStateAction<boolean>>;
   setIsProfileOpen: React.Dispatch<React.SetStateAction<boolean>>;
 }
 
-const MyProfile = ({ setIsOptionOpen, setIsProfileOpen }: MyProfileType) => {
+const MyProfile = ({
+  onActionAlert,
+  setIsOptionOpen,
+  setIsProfileOpen,
+}: MyProfileType) => {
   const accessToken = useGameStore((state) => state.accessToken);
   const booName = useGameStore((state) => state.booName);
   const userEmail = useGameStore((state) => state.userEmail);
@@ -30,10 +47,14 @@ const MyProfile = ({ setIsOptionOpen, setIsProfileOpen }: MyProfileType) => {
   const userName = useGameStore((state) => state.userName);
   const userNickname = useGameStore((state) => state.userNickname);
   const studentId = useGameStore((state) => state.studentId);
-  const [editMode, setEditMode] = useState<"nickname" | "password" | null>(
-    null,
+  const isGuestMode = useGameStore((state) => state.isGuestMode);
+  const setStudentId = useGameStore((state) => state.setStudentId);
+  const setUserName = useGameStore((state) => state.setUserName);
+  const setUserNickname = useGameStore((state) => state.setUserNickname);
+  const [editMode, setEditMode] = useState<ProfileEditMode | null>(null);
+  const [profileTextInput, setProfileTextInput] = useState(
+    userNickname || booName,
   );
-  const [nicknameInput, setNicknameInput] = useState(userNickname || booName);
   const [passwordInput, setPasswordInput] = useState("");
   const [confirmPasswordInput, setConfirmPasswordInput] = useState("");
   const [statusMessage, setStatusMessage] = useState("");
@@ -58,9 +79,37 @@ const MyProfile = ({ setIsOptionOpen, setIsProfileOpen }: MyProfileType) => {
     setIsProfileOpen(false);
   };
 
-  const openEditMode = (mode: "nickname" | "password") => {
+  const getEditModeLabel = (mode: Exclude<ProfileEditMode, "password">) => {
+    switch (mode) {
+      case "studentId":
+        return "학번";
+      case "name":
+        return "이름";
+      case "nickname":
+        return "닉네임";
+    }
+  };
+
+  const getProfileTextValue = (mode: Exclude<ProfileEditMode, "password">) => {
+    switch (mode) {
+      case "studentId":
+        return studentId;
+      case "name":
+        return userName;
+      case "nickname":
+        return userNickname || booName;
+    }
+  };
+
+  const openEditMode = (mode: ProfileEditMode) => {
+    if (isGuestMode && mode === "password") {
+      return;
+    }
+
     setStatusMessage("");
-    setNicknameInput(userNickname || booName);
+    if (mode !== "password") {
+      setProfileTextInput(getProfileTextValue(mode));
+    }
     setEditMode(mode);
   };
 
@@ -69,18 +118,23 @@ const MyProfile = ({ setIsOptionOpen, setIsProfileOpen }: MyProfileType) => {
     setStatusMessage("");
     setPasswordInput("");
     setConfirmPasswordInput("");
-    setNicknameInput(userNickname || booName);
+    setProfileTextInput(userNickname || booName);
   };
 
   const handleSavePress = async () => {
-    if (!accessToken || !editMode || isSaving) {
+    if (!editMode || isSaving) {
       return;
     }
 
-    const trimmedNickname = nicknameInput.trim();
+    const trimmedProfileText = profileTextInput.trim();
 
-    if (editMode === "nickname" && !trimmedNickname) {
-      setStatusMessage("닉네임을 입력해주세요.");
+    if (editMode !== "password" && !trimmedProfileText) {
+      const label = getEditModeLabel(editMode);
+      setStatusMessage(`${label}을 입력해주세요.`);
+      onActionAlert?.("입력 확인", `${label}을 입력해주세요.`, {
+        autoHideDuration: 1600,
+        textSize: "compact",
+      });
       return;
     }
 
@@ -91,38 +145,108 @@ const MyProfile = ({ setIsOptionOpen, setIsProfileOpen }: MyProfileType) => {
         !/\d/.test(passwordInput)
       ) {
         setStatusMessage("비밀번호는 8자 이상, 영문과 숫자를 포함해야 해요.");
+        onActionAlert?.(
+          "입력 확인",
+          "비밀번호는 8자 이상,\n영문과 숫자를 포함해야 해요.",
+          {
+            autoHideDuration: 1800,
+            textSize: "compact",
+          },
+        );
         return;
       }
 
       if (passwordInput !== confirmPasswordInput) {
         setStatusMessage("비밀번호가 일치하지 않아요.");
+        onActionAlert?.("입력 확인", "비밀번호가 일치하지 않아요.", {
+          autoHideDuration: 1600,
+          textSize: "compact",
+        });
         return;
       }
     }
 
+    if (isGuestMode && editMode !== "password") {
+      const label = getEditModeLabel(editMode);
+
+      if (editMode === "studentId") {
+        setStudentId(trimmedProfileText);
+      }
+
+      if (editMode === "name") {
+        setUserName(trimmedProfileText);
+      }
+
+      if (editMode === "nickname") {
+        setUserNickname(trimmedProfileText);
+      }
+
+      setEditMode(null);
+      setStatusMessage(`${label}을 변경했어요.`);
+      onActionAlert?.(`${label} 변경 완료`, "게스트 정보가 저장됐어요.", {
+        autoHideDuration: 1800,
+        textSize: "compact",
+      });
+      return;
+    }
+
+    if (!accessToken) {
+      return;
+    }
+
+    const serverUpdateParams =
+      editMode === "nickname"
+        ? { nickname: trimmedProfileText }
+        : editMode === "studentId"
+          ? { student_id: trimmedProfileText }
+          : editMode === "password"
+            ? { password: passwordInput }
+            : null;
+
+    if (!serverUpdateParams) {
+      return;
+    }
+
+    const serverEditLabel =
+      editMode === "password" ? "비밀번호" : getEditModeLabel(editMode);
+
     setIsSaving(true);
     setStatusMessage("");
+    onActionAlert?.(
+      `${serverEditLabel} 변경 중`,
+      "서버에 계정 정보를 저장하고 있어요.",
+      {
+        autoHideDuration: 0,
+        textSize: "compact",
+      },
+    );
 
     try {
-      await updateCurrentUser(
-        editMode === "nickname"
-          ? { nickname: trimmedNickname }
-          : { password: passwordInput },
-        accessToken,
-      );
+      await updateCurrentUser(serverUpdateParams, accessToken);
       await syncServerUserStats(accessToken);
       setEditMode(null);
       setPasswordInput("");
       setConfirmPasswordInput("");
-      setStatusMessage(
-        editMode === "nickname"
-          ? "닉네임을 변경했어요."
-          : "비밀번호를 변경했어요.",
+      setStatusMessage(`${serverEditLabel}을 변경했어요.`);
+      onActionAlert?.(
+        `${serverEditLabel} 변경 완료`,
+        "계정 정보가 저장됐어요.",
+        {
+          autoHideDuration: 1800,
+          textSize: "compact",
+        },
       );
     } catch (error) {
-      setStatusMessage(
-        getServerApiErrorMessage(error, "계정 정보를 변경하지 못했어요."),
+      const errorMessage = getServerApiErrorMessage(
+        error,
+        "계정 정보를 변경하지 못했어요.",
       );
+
+      setStatusMessage(errorMessage);
+      onActionAlert?.("저장 실패", errorMessage, {
+        autoHideDuration: 2200,
+        textSize: "compact",
+      });
     } finally {
       setIsSaving(false);
     }
@@ -153,6 +277,18 @@ const MyProfile = ({ setIsOptionOpen, setIsProfileOpen }: MyProfileType) => {
             />
           )}
           label="학번"
+          onPress={isGuestMode ? () => openEditMode("studentId") : undefined}
+          rightAccessory={
+            isGuestMode
+              ? (pressed) => (
+                  <Feather
+                    name="chevron-right"
+                    size={18}
+                    color={pressed ? colors.WHITE_NORMAL : colors.GREEN_NORMAL}
+                  />
+                )
+              : undefined
+          }
           value={studentId}
         />
         <ProfileButton
@@ -166,6 +302,18 @@ const MyProfile = ({ setIsOptionOpen, setIsProfileOpen }: MyProfileType) => {
             />
           )}
           label="이름"
+          onPress={isGuestMode ? () => openEditMode("name") : undefined}
+          rightAccessory={
+            isGuestMode
+              ? (pressed) => (
+                  <Feather
+                    name="chevron-right"
+                    size={18}
+                    color={pressed ? colors.WHITE_NORMAL : colors.GREEN_NORMAL}
+                  />
+                )
+              : undefined
+          }
           value={userName}
         />
         <ProfileButton
@@ -205,41 +353,45 @@ const MyProfile = ({ setIsOptionOpen, setIsProfileOpen }: MyProfileType) => {
           )}
           value={userNickname || booName}
         />
-        <ProfileButton
-          icon={(pressed) => (
-            <Feather
-              name="lock"
-              size={20}
-              color={
-                pressed ? colors.WHITE_NORMAL : colors.SILVER_NORMAL_ACTIVE
-              }
-            />
-          )}
-          label="비밀번호"
-          onPress={() => openEditMode("password")}
-          rightAccessory={(pressed) => (
-            <Feather
-              name="chevron-right"
-              size={18}
-              color={pressed ? colors.WHITE_NORMAL : colors.GREEN_NORMAL}
-            />
-          )}
-          value="수정하기"
-        />
+        {!isGuestMode ? (
+          <ProfileButton
+            icon={(pressed) => (
+              <Feather
+                name="lock"
+                size={20}
+                color={
+                  pressed ? colors.WHITE_NORMAL : colors.SILVER_NORMAL_ACTIVE
+                }
+              />
+            )}
+            label="비밀번호"
+            onPress={() => openEditMode("password")}
+            rightAccessory={(pressed) => (
+              <Feather
+                name="chevron-right"
+                size={18}
+                color={pressed ? colors.WHITE_NORMAL : colors.GREEN_NORMAL}
+              />
+            )}
+            value="수정하기"
+          />
+        ) : null}
       </View>
       {editMode ? (
         <View style={styles.editBox}>
           <Text style={styles.editTitle}>
-            {editMode === "nickname" ? "닉네임 수정" : "비밀번호 수정"}
+            {editMode === "password"
+              ? "비밀번호 수정"
+              : `${getEditModeLabel(editMode)} 수정`}
           </Text>
-          {editMode === "nickname" ? (
+          {editMode !== "password" ? (
             <TextInput
               autoCapitalize="none"
-              onChangeText={setNicknameInput}
-              placeholder="닉네임"
+              onChangeText={setProfileTextInput}
+              placeholder={getEditModeLabel(editMode)}
               placeholderTextColor={colors.SILVER_NORMAL}
               style={styles.input}
-              value={nicknameInput}
+              value={profileTextInput}
             />
           ) : (
             <>

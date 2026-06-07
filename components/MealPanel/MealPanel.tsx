@@ -11,12 +11,12 @@ import { fonts } from "@/constants/fonts";
 import { useGameStore } from "@/stores/useGameStore";
 import {
   feedSchoolFood,
-  getSchoolFood,
   getSchoolFoodFeedStatus,
   getServerApiErrorMessage,
   listSchoolFoods,
   listTodaySchoolFoods,
   type SchoolFood,
+  type SchoolFoodToday,
 } from "@/utils/serverApi";
 import { playSoundEffect } from "@/utils/soundEffects";
 import { useQuery } from "@tanstack/react-query";
@@ -66,6 +66,26 @@ const getServerMealMenuItems = (schoolFoods: SchoolFood[]): MealMenuItem[] => {
     }));
 };
 
+const getTodaySchoolFoodsForMealSection = (
+  todaySchoolFoods: SchoolFoodToday | undefined,
+  mealSectionId: string | null,
+) => {
+  if (!todaySchoolFoods?.sections.length) {
+    return [];
+  }
+
+  const matchingSection = mealSectionId
+    ? todaySchoolFoods.sections.find(
+        (section) => normalizeMealSectionId(section.meal_slot) === mealSectionId,
+      )
+    : null;
+
+  return (
+    matchingSection?.items ??
+    todaySchoolFoods.sections.flatMap((section) => section.items)
+  );
+};
+
 const MealPanel = ({
   onFeedInsufficientCoin,
   onFeedSuccess,
@@ -86,7 +106,7 @@ const MealPanel = ({
   const [feedErrorMessage, setFeedErrorMessage] = useState<string | null>(null);
   const [isFeeding, setIsFeeding] = useState(false);
   const [selectedMealId, setSelectedMealId] = useState(DEFAULT_MEAL_MENU_ID);
-  const { data: todaySchoolFoods = [] } = useQuery({
+  const { data: todaySchoolFoodResponse } = useQuery({
     queryKey: ["schoolFoods", "today"],
     queryFn: listTodaySchoolFoods,
     staleTime: 1000 * 60 * 10,
@@ -116,10 +136,19 @@ const MealPanel = ({
 
   const isWeekend = isWeekendDate(now, mealDayMode);
   const activeMealSectionId = getActiveMealSectionId(now);
+  const todaySchoolFoods = useMemo(
+    () =>
+      getTodaySchoolFoodsForMealSection(
+        todaySchoolFoodResponse,
+        activeMealSectionId,
+      ),
+    [activeMealSectionId, todaySchoolFoodResponse],
+  );
   const { data: fallbackSchoolFoods = [] } = useQuery({
-    queryKey: ["schoolFoods", "list", activeMealSectionId],
-    queryFn: () => listSchoolFoods(activeMealSectionId),
-    enabled: todaySchoolFoods.length === 0,
+    queryKey: ["schoolFoods", "list", activeMealSectionId, accessToken],
+    queryFn: () =>
+      listSchoolFoods(activeMealSectionId, accessToken ?? undefined),
+    enabled: todaySchoolFoods.length === 0 && !!accessToken,
     staleTime: 1000 * 60 * 10,
     gcTime: 1000 * 60 * 30,
     retry: 1,
@@ -235,7 +264,6 @@ const MealPanel = ({
       setIsMealOpen(false);
 
       try {
-        await getSchoolFood(selectedMeal.schoolFoodId);
         const result = await feedSchoolFood(
           selectedMeal.schoolFoodId,
           accessToken,
@@ -247,6 +275,7 @@ const MealPanel = ({
             normalizeMealSectionId(result.meal_slot) ??
             effectiveActiveMealSectionId,
           totalXp: result.xp_point + optimisticAchievementXpDelta,
+          unlockedAchievements: result.unlocked_achievements,
         });
         await refetchFeedStatus();
       } catch (error) {

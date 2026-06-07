@@ -122,12 +122,24 @@ export type TokenWithRefresh = {
   access_token: string;
   refresh_token: string;
   token_type: string;
+  unlocked_achievements?: ServerUnlockedAchievement[];
+};
+
+export type ServerUnlockedAchievement = {
+  achievement_key: string;
+  reward_item_key?: string | null;
+  reward_type: string;
+  reward_value?: number | null;
+  title: string;
 };
 
 export type EconomyStatus = {
   coin: number;
   heart: number;
+  heart_updated_at?: string | null;
   max_heart: number;
+  next_heart_at?: string | null;
+  server_time?: string;
 };
 
 export type UserOut = {
@@ -144,6 +156,7 @@ export type UserOut = {
   student_id: string;
   user_id: number;
   xp_point: number;
+  is_admin?: boolean;
 };
 
 export type UserAccountUpdate = {
@@ -161,11 +174,24 @@ export type SchoolFood = {
   type?: string | null;
 };
 
+export type SchoolFoodSection = {
+  items: SchoolFood[];
+  meal_slot: string;
+};
+
+export type SchoolFoodToday = {
+  date: string;
+  sections: SchoolFoodSection[];
+  server_time: string;
+};
+
 export type SchoolFoodFeedStatus = {
   can_feed_now: boolean;
   current_slot?: string | null;
   date: string;
   fed_slots: string[];
+  next_slot_at?: string | null;
+  server_time?: string;
 };
 
 export type SchoolFoodFeedResult = {
@@ -177,6 +203,7 @@ export type SchoolFoodFeedResult = {
   meal_slot: string;
   school_food_id: number;
   spent_coin: number;
+  unlocked_achievements?: ServerUnlockedAchievement[];
   xp_point: number;
 };
 
@@ -189,6 +216,7 @@ export type QuizQuestionOut = {
 };
 
 export type QuizPlayStatus = {
+  blocked_reason?: string | null;
   can_play_now: boolean;
   cooldown_hours: number;
   daily_limit: number;
@@ -206,14 +234,52 @@ export type QuizSubmitResult = {
   correct: boolean;
   correct_answer: string;
   detail: string;
+  unlocked_achievements?: ServerUnlockedAchievement[];
   xp_point: number;
 };
 
 export type BooCharacter = {
   character_id: number;
   character_name: string;
+  state?: string | null;
   stage?: number | null;
   user_id: number;
+};
+
+export type CharacterMeOut = {
+  character_id: number;
+  character_name: string;
+  pending_evolution?: boolean;
+  stage: number;
+  state: string;
+  xp_point: number;
+};
+
+export type CharacterMeUpdate = {
+  character_name?: string | null;
+  state?: string | null;
+};
+
+export type CharacterMealHealth = {
+  applied_penalty_count: number;
+  hungry_state: boolean;
+  last_checked_meal_slot?: string | null;
+  server_time: string;
+  skipped_meal_count: number;
+};
+
+export type CharacterXpResult = {
+  added_xp: number;
+  pending_evolution: boolean;
+  stage: number;
+  unlocked_achievements?: ServerUnlockedAchievement[];
+  xp_point: number;
+};
+
+export type CharacterMealPenaltyResult = CharacterMealHealth & {
+  applied_penalty: number;
+  unlocked_achievements?: ServerUnlockedAchievement[];
+  xp_point: number;
 };
 
 export type FriendUser = {
@@ -227,6 +293,22 @@ export type FriendOut = {
   created_at: string;
   friend: FriendUser;
   friend_id: number;
+  unlocked_achievements?: ServerUnlockedAchievement[];
+};
+
+export type FriendDetail = FriendOut & {
+  best_score?: number | null;
+  xp_point?: number;
+};
+
+export type FriendRequestOut = {
+  created_at: string;
+  receiver: FriendUser;
+  request_id: number;
+  requester: FriendUser;
+  responded_at?: string | null;
+  status: string;
+  unlocked_achievements?: ServerUnlockedAchievement[];
 };
 
 export type MiniGamePlayResult = {
@@ -234,13 +316,19 @@ export type MiniGamePlayResult = {
   coin: number;
   detail: string;
   heart: number;
+  heart_updated_at?: string | null;
   max_heart: number;
+  next_heart_at?: string | null;
   spent_heart: number;
+  unlocked_achievements?: ServerUnlockedAchievement[];
 };
 
 export type MiniGameResultCreate = {
+  ended_reason?: string | null;
   game_type?: string | null;
   location?: string | null;
+  mode?: string | null;
+  play_session_id?: string | null;
   play_time_seconds?: number | null;
   score: number;
   success?: boolean | null;
@@ -248,12 +336,16 @@ export type MiniGameResultCreate = {
 
 export type MiniGameResultOut = {
   created_at: string;
+  ended_reason?: string | null;
   game_type?: string | null;
   location?: string | null;
+  mode?: string | null;
+  play_session_id?: string | null;
   play_time_seconds?: number | null;
   result_id: number;
   score: number;
   success: boolean;
+  unlocked_achievements?: ServerUnlockedAchievement[];
   user_id: number;
 };
 
@@ -262,6 +354,40 @@ export type MiniGameRankingMe = {
   rank?: number | null;
   total_ranked_users: number;
   total_users: number;
+};
+
+export type MiniGameMode = "normal" | "infinite" | string;
+
+export type MiniGameStartResult = {
+  heart: number;
+  heart_updated_at?: string | null;
+  max_heart: number;
+  next_heart_at?: string | null;
+  play_session_id: string;
+  spent_heart: number;
+  unlocked_achievements?: ServerUnlockedAchievement[];
+};
+
+export type MiniGameRewardResult = {
+  awarded_coin: number;
+  coin: number;
+  unlocked_achievements?: ServerUnlockedAchievement[];
+};
+
+export type MiniGameRankingUser = {
+  best_score: number;
+  image?: string | null;
+  nickname: string;
+  rank: number;
+  student_id: string;
+  user_id: number;
+};
+
+export type MiniGameRankingList = {
+  game_type?: string | null;
+  mode?: string | null;
+  rankings: MiniGameRankingUser[];
+  total_ranked_users: number;
 };
 
 export type ShopItemTypeOut = {
@@ -274,6 +400,7 @@ export type ShopItemOut = {
   equipped?: boolean;
   image?: string | null;
   is_default?: boolean | null;
+  item_key?: string | null;
   item_id: number;
   item_type: string;
   name: string;
@@ -288,9 +415,25 @@ export type RoomEquippedItemOut = {
   item_type: string;
 };
 
+export type RoomOwnerOut = FriendUser & {
+  grade: number;
+  xp_point: number;
+};
+
+export type RoomCharacterOut = {
+  character_id?: number | null;
+  character_name?: string | null;
+  stage: number;
+  state?: string | null;
+  xp_point: number;
+};
+
 export type RoomView = {
+  character?: RoomCharacterOut | null;
   equipped_items: RoomEquippedItemOut[];
-  owner: FriendUser;
+  owner: RoomOwnerOut;
+  unlocked_achievements?: ServerUnlockedAchievement[];
+  wallpaper?: ShopItemOut | null;
 };
 
 export type GuestbookOut = {
@@ -300,6 +443,85 @@ export type GuestbookOut = {
   room_owner_id: number;
   writer_id: number;
   writer_nickname: string;
+};
+
+export type GuestbookPage = {
+  items: GuestbookOut[];
+  next_cursor?: string | null;
+};
+
+export type AppConfig = {
+  minigame: {
+    heart_recovery_minutes: number;
+    heart_cost: number;
+    max_heart: number;
+    reward_coin: number;
+  };
+  quiz: {
+    cooldown_hours: number;
+    correct_xp: number;
+    daily_limit: number;
+    incorrect_xp: number;
+    reward_coin: number;
+  };
+  school_food: {
+    feed_coin_cost: number;
+    feed_xp: number;
+  };
+};
+
+export type TutorialFlags = {
+  has_seen_game_tutorial?: boolean;
+  has_seen_minigame_tutorial?: boolean;
+};
+
+export type AppBootstrap = {
+  character?: BooCharacter | null;
+  economy: EconomyStatus;
+  room: RoomView;
+  shop_items: ShopItemOut[];
+  tutorial_flags: TutorialFlags;
+  user: UserOut;
+};
+
+export type UserPreferenceOut = {
+  bgm_volume?: number | null;
+  has_seen_game_tutorial?: boolean;
+  has_seen_minigame_tutorial?: boolean;
+  master_volume?: number | null;
+  sfx_volume?: number | null;
+  updated_at?: string | null;
+};
+
+export type UserPreferenceUpdate = Omit<UserPreferenceOut, "updated_at">;
+
+export type ProfileImageOut = {
+  image?: string | null;
+};
+
+export type AchievementMaster = {
+  achievement_key: string;
+  condition_type: string;
+  reward_item_key?: string | null;
+  reward_type: string;
+  reward_value?: number | null;
+  sort_order: number;
+  target_value: number;
+  title: string;
+};
+
+export type AchievementProgress = AchievementMaster & {
+  claimed: boolean;
+  completed: boolean;
+  completed_at?: string | null;
+  progress_value: number;
+};
+
+export type AchievementEventResult = {
+  coin: number;
+  event_type: string;
+  unlocked_achievements: ServerUnlockedAchievement[];
+  xp_point: number;
 };
 
 export type ShopItemPurchaseResult = {
@@ -442,6 +664,76 @@ export const deleteCurrentUser = async (accessToken?: string) => {
   return response.data;
 };
 
+export const updateCurrentUserImage = async (
+  imageUrl: string,
+  accessToken?: string,
+) => {
+  const response = await booApiClient.post<ProfileImageOut>(
+    "/user/me/image",
+    {
+      image_url: imageUrl,
+    },
+    {
+      headers: accessToken
+        ? {
+            Authorization: `Bearer ${accessToken}`,
+          }
+        : undefined,
+    },
+  );
+
+  return response.data;
+};
+
+export const deleteCurrentUserImage = async (accessToken?: string) => {
+  const response = await booApiClient.delete<ProfileImageOut>(
+    "/user/me/image",
+    {
+      headers: accessToken
+        ? {
+            Authorization: `Bearer ${accessToken}`,
+          }
+        : undefined,
+    },
+  );
+
+  return response.data;
+};
+
+export const getCurrentUserPreferences = async (accessToken?: string) => {
+  const response = await booApiClient.get<UserPreferenceOut>(
+    "/user/me/preferences",
+    {
+      headers: accessToken
+        ? {
+            Authorization: `Bearer ${accessToken}`,
+          }
+        : undefined,
+    },
+  );
+
+  return response.data;
+};
+
+export const updateCurrentUserPreferences = async (
+  params: UserPreferenceUpdate,
+  accessToken?: string,
+) => {
+  const response = await booApiClient.put<UserPreferenceOut>(
+    "/user/me/preferences",
+    params,
+    {
+      headers: accessToken
+        ? {
+            Authorization: `Bearer ${accessToken}`,
+          }
+        : undefined,
+    },
+  );
+
+  return response.data;
+};
+
 export const getEconomyStatus = async (accessToken?: string) => {
   const response = await booApiClient.get<EconomyStatus>("/economy/status", {
     headers: accessToken
@@ -454,23 +746,104 @@ export const getEconomyStatus = async (accessToken?: string) => {
   return response.data;
 };
 
-export const listTodaySchoolFoods = async () => {
-  const response = await booApiClient.get<SchoolFood[]>("/school-foods/today");
+export const getAppConfig = async () => {
+  const response = await booApiClient.get<AppConfig>("/app/config");
 
   return response.data;
 };
 
-export const listSchoolFoods = async (type?: string | null) => {
+export const getAppBootstrap = async (accessToken?: string) => {
+  const response = await booApiClient.get<AppBootstrap>("/app/bootstrap", {
+    headers: accessToken
+      ? {
+          Authorization: `Bearer ${accessToken}`,
+        }
+      : undefined,
+  });
+
+  return response.data;
+};
+
+export const listAchievements = async () => {
+  const response = await booApiClient.get<AchievementMaster[]>(
+    "/achievements/",
+  );
+
+  return response.data;
+};
+
+export const listMyAchievementProgress = async (accessToken?: string) => {
+  const response = await booApiClient.get<AchievementProgress[]>(
+    "/achievements/me",
+    {
+      headers: accessToken
+        ? {
+            Authorization: `Bearer ${accessToken}`,
+          }
+        : undefined,
+    },
+  );
+
+  return response.data;
+};
+
+export const sendAchievementEvent = async (
+  eventType: string,
+  accessToken?: string,
+) => {
+  const response = await booApiClient.post<AchievementEventResult>(
+    "/achievements/events",
+    {
+      event_type: eventType,
+    },
+    {
+      headers: accessToken
+        ? {
+            Authorization: `Bearer ${accessToken}`,
+          }
+        : undefined,
+    },
+  );
+
+  return response.data;
+};
+
+export const listTodaySchoolFoods = async () => {
+  const response =
+    await booApiClient.get<SchoolFoodToday>("/school-foods/today");
+
+  return response.data;
+};
+
+export const listSchoolFoods = async (
+  type?: string | null,
+  accessToken?: string,
+) => {
   const response = await booApiClient.get<SchoolFood[]>("/school-foods/", {
+    headers: accessToken
+      ? {
+          Authorization: `Bearer ${accessToken}`,
+        }
+      : undefined,
     params: type ? { type } : undefined,
   });
 
   return response.data;
 };
 
-export const getSchoolFood = async (schoolFoodId: number) => {
+export const getSchoolFood = async (
+  schoolFoodId: number,
+  accessToken?: string,
+) => {
   const response = await booApiClient.get<SchoolFood>(
     `/school-foods/${schoolFoodId}`,
+    {
+      headers: accessToken
+        ? {
+            Authorization: `Bearer ${accessToken}`,
+          }
+        : undefined,
+    },
   );
 
   return response.data;
@@ -626,6 +999,107 @@ export const deleteCharacter = async (characterId: number) => {
   return response.data;
 };
 
+export const getMyCharacter = async (accessToken?: string) => {
+  const response = await booApiClient.get<CharacterMeOut>("/characters/me", {
+    headers: accessToken
+      ? {
+          Authorization: `Bearer ${accessToken}`,
+        }
+      : undefined,
+  });
+
+  return response.data;
+};
+
+export const updateMyCharacter = async (
+  params: CharacterMeUpdate,
+  accessToken?: string,
+) => {
+  const response = await booApiClient.put<CharacterMeOut>(
+    "/characters/me",
+    params,
+    {
+      headers: accessToken
+        ? {
+            Authorization: `Bearer ${accessToken}`,
+          }
+        : undefined,
+    },
+  );
+
+  return response.data;
+};
+
+export const getMyCharacterMealHealth = async (accessToken?: string) => {
+  const response = await booApiClient.get<CharacterMealHealth>(
+    "/characters/me/meal-health",
+    {
+      headers: accessToken
+        ? {
+            Authorization: `Bearer ${accessToken}`,
+          }
+        : undefined,
+    },
+  );
+
+  return response.data;
+};
+
+export const addMyCharacterXp = async (
+  amount: number,
+  reason?: string | null,
+  accessToken?: string,
+) => {
+  const response = await booApiClient.post<CharacterXpResult>(
+    "/characters/me/xp",
+    {
+      amount,
+      reason,
+    },
+    {
+      headers: accessToken
+        ? {
+            Authorization: `Bearer ${accessToken}`,
+          }
+        : undefined,
+    },
+  );
+
+  return response.data;
+};
+
+export const confirmMyCharacterEvolution = async (accessToken?: string) => {
+  const response = await booApiClient.post<CharacterMeOut>(
+    "/characters/me/evolve/confirm",
+    undefined,
+    {
+      headers: accessToken
+        ? {
+            Authorization: `Bearer ${accessToken}`,
+          }
+        : undefined,
+    },
+  );
+
+  return response.data;
+};
+
+export const applyMyCharacterMealPenalty = async (accessToken?: string) => {
+  const response = await booApiClient.post<CharacterMealPenaltyResult>(
+    "/characters/me/meal-penalty/apply",
+    undefined,
+    {
+      headers: accessToken
+        ? {
+            Authorization: `Bearer ${accessToken}`,
+          }
+        : undefined,
+    },
+  );
+
+  return response.data;
+};
+
 export const listFriends = async (accessToken?: string) => {
   const response = await booApiClient.get<FriendOut[]>("/friends/", {
     headers: accessToken
@@ -695,10 +1169,129 @@ export const deleteServerFriend = async (
   return response.data;
 };
 
+export const listFriendRequests = async (accessToken?: string) => {
+  const response = await booApiClient.get<FriendRequestOut[]>(
+    "/friends/requests",
+    {
+      headers: accessToken
+        ? {
+            Authorization: `Bearer ${accessToken}`,
+          }
+        : undefined,
+    },
+  );
+
+  return response.data;
+};
+
+export const createFriendRequest = async (
+  studentId: string,
+  accessToken?: string,
+) => {
+  const response = await booApiClient.post<FriendRequestOut>(
+    "/friends/requests",
+    {
+      student_id: studentId,
+    },
+    {
+      headers: accessToken
+        ? {
+            Authorization: `Bearer ${accessToken}`,
+          }
+        : undefined,
+    },
+  );
+
+  return response.data;
+};
+
+export const acceptFriendRequest = async (
+  requestId: number,
+  accessToken?: string,
+) => {
+  const response = await booApiClient.post<FriendRequestOut>(
+    `/friends/requests/${requestId}/accept`,
+    undefined,
+    {
+      headers: accessToken
+        ? {
+            Authorization: `Bearer ${accessToken}`,
+          }
+        : undefined,
+    },
+  );
+
+  return response.data;
+};
+
+export const deleteFriendRequest = async (
+  requestId: number,
+  accessToken?: string,
+) => {
+  const response = await booApiClient.delete<Record<string, never>>(
+    `/friends/requests/${requestId}`,
+    {
+      headers: accessToken
+        ? {
+            Authorization: `Bearer ${accessToken}`,
+          }
+        : undefined,
+    },
+  );
+
+  return response.data;
+};
+
 export const playMiniGameEconomy = async (accessToken?: string) => {
   const response = await booApiClient.post<MiniGamePlayResult>(
     "/economy/minigame/play",
     undefined,
+    {
+      headers: accessToken
+        ? {
+            Authorization: `Bearer ${accessToken}`,
+          }
+        : undefined,
+    },
+  );
+
+  return response.data;
+};
+
+export const startMiniGameEconomy = async (
+  params: {
+    game_type: string;
+    mode?: MiniGameMode;
+  },
+  accessToken?: string,
+) => {
+  const response = await booApiClient.post<MiniGameStartResult>(
+    "/economy/minigame/start",
+    params,
+    {
+      headers: accessToken
+        ? {
+            Authorization: `Bearer ${accessToken}`,
+          }
+        : undefined,
+    },
+  );
+
+  return response.data;
+};
+
+export const rewardMiniGameEconomy = async (
+  params: {
+    game_type: string;
+    mode?: MiniGameMode;
+    play_session_id: string;
+    score: number;
+  },
+  accessToken?: string,
+) => {
+  const response = await booApiClient.post<MiniGameRewardResult>(
+    "/economy/minigame/reward",
+    params,
     {
       headers: accessToken
         ? {
@@ -739,6 +1332,52 @@ export const listMyMiniGameResults = async (accessToken?: string) => {
             Authorization: `Bearer ${accessToken}`,
           }
         : undefined,
+    },
+  );
+
+  return response.data;
+};
+
+export const listMiniGameRankings = async (
+  params: {
+    game_type?: string;
+    limit?: number;
+    mode?: MiniGameMode;
+  },
+  accessToken?: string,
+) => {
+  const response = await booApiClient.get<MiniGameRankingList>(
+    "/minigames/rankings",
+    {
+      headers: accessToken
+        ? {
+            Authorization: `Bearer ${accessToken}`,
+          }
+        : undefined,
+      params,
+    },
+  );
+
+  return response.data;
+};
+
+export const listFriendMiniGameRankings = async (
+  params: {
+    game_type?: string;
+    limit?: number;
+    mode?: MiniGameMode;
+  },
+  accessToken?: string,
+) => {
+  const response = await booApiClient.get<MiniGameRankingList>(
+    "/minigames/rankings/friends",
+    {
+      headers: accessToken
+        ? {
+            Authorization: `Bearer ${accessToken}`,
+          }
+        : undefined,
+      params,
     },
   );
 
@@ -811,11 +1450,26 @@ export const getMyRoom = async (accessToken?: string) => {
 };
 
 export const equipRoomItem = async (itemId: number, accessToken?: string) => {
-  const response = await booApiClient.put<RoomEquippedItemOut>(
+  const response = await booApiClient.put<RoomView>(
     "/rooms/me/equip",
     {
       item_id: itemId,
     },
+    {
+      headers: accessToken
+        ? {
+            Authorization: `Bearer ${accessToken}`,
+          }
+        : undefined,
+    },
+  );
+
+  return response.data;
+};
+
+export const unequipRoomItem = async (slot: string, accessToken?: string) => {
+  const response = await booApiClient.delete<RoomView>(
+    `/rooms/me/equip/${slot}`,
     {
       headers: accessToken
         ? {
@@ -843,8 +1497,12 @@ export const getUserRoom = async (userId: number, accessToken?: string) => {
 export const listRoomGuestbook = async (
   userId: number,
   accessToken?: string,
+  options?: {
+    cursor?: string | null;
+    limit?: number;
+  },
 ) => {
-  const response = await booApiClient.get<GuestbookOut[]>(
+  const response = await booApiClient.get<GuestbookPage>(
     `/rooms/${userId}/guestbook`,
     {
       headers: accessToken
@@ -852,6 +1510,10 @@ export const listRoomGuestbook = async (
             Authorization: `Bearer ${accessToken}`,
           }
         : undefined,
+      params: {
+        cursor: options?.cursor ?? undefined,
+        limit: options?.limit,
+      },
     },
   );
 
@@ -868,6 +1530,46 @@ export const createRoomGuestbook = async (
     {
       content,
     },
+    {
+      headers: accessToken
+        ? {
+            Authorization: `Bearer ${accessToken}`,
+          }
+        : undefined,
+    },
+  );
+
+  return response.data;
+};
+
+export const updateRoomGuestbook = async (
+  entryId: number,
+  content: string,
+  accessToken?: string,
+) => {
+  const response = await booApiClient.put<GuestbookOut>(
+    `/rooms/guestbook/${entryId}`,
+    {
+      content,
+    },
+    {
+      headers: accessToken
+        ? {
+            Authorization: `Bearer ${accessToken}`,
+          }
+        : undefined,
+    },
+  );
+
+  return response.data;
+};
+
+export const deleteRoomGuestbook = async (
+  entryId: number,
+  accessToken?: string,
+) => {
+  const response = await booApiClient.delete<Record<string, never>>(
+    `/rooms/guestbook/${entryId}`,
     {
       headers: accessToken
         ? {

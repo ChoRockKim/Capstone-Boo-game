@@ -49,6 +49,10 @@ npm run lint
 - `/miniGame`: 미니게임 장소 선택
 - `/miniGame/catchTheMajor`: 전공책 받기 시작 화면
 - `/miniGame/catchTheMajorPlay`: 전공책 받기 플레이 화면
+- `/miniGame/catchBoo`: 부 잡기 시작 화면
+- `/miniGame/catchBooPlay`: 부 잡기 플레이 화면
+- `/miniGame/freeThrow`: 자유투 넣기 시작 화면
+- `/miniGame/freeThrowPlay`: 자유투 넣기 플레이 화면
 - `/room`: 마이룸
 - `/room/[friendId]`: 친구 방 방문
 
@@ -60,8 +64,14 @@ npm run lint
 - 무한모드는 점수 아이템을 먹을 때마다 낙하/스폰 속도가 1%씩 빨라지며 최대 1.8배까지 증가합니다.
 - 무한모드 랭킹은 기존 `miniGameHardScores` 데이터를 호환 사용합니다.
 - 전공책 받기 인게임 화면은 iOS swipe back gesture를 비활성화합니다.
-- 전공책 받기 점수 아이템 획득 시 `assets/musics/sfx/point-plus.mp3`를 재생합니다.
-- BGM 기본 볼륨은 이전 대비 약 70% 수준으로 낮춰져 있습니다.
+- 부 잡기 일반모드는 30초 제한, 50P 이상 성공, 성공 시 `+3 coin`을 지급합니다.
+- 자유투 넣기는 오바마홀에서 시작하며, 5회 연속 성공 시 `+3 coin`을 지급합니다.
+- 로그인 상태 미니게임 시작/보상은 서버 `/economy/minigame/start`, `/economy/minigame/reward`를 우선 사용합니다.
+- 미니게임 랭킹 목록은 서버 `/minigames/rankings`, `/minigames/rankings/friends`를 사용합니다.
+- 게스트 모드는 `guestGameSnapshot`에 로컬 진행도를 보관하며, 친구/방명록/친구 랭킹 기능은 사용하지 않습니다.
+- 4학년 XP를 모두 채우면 졸업 화면을 표시하고, 졸업 리포트 통계는 현재 로컬 누적값을 사용합니다.
+- 전공책 받기 점수 아이템 획득 시 `assets/musics/sfx/point-plus.m4a`를 재생합니다.
+- BGM 기본 볼륨은 이전 대비 약 70% 수준으로 낮춰져 있고, 졸업 화면은 `assets/musics/bgm/graduation.mp3`를 별도 BGM으로 사용합니다.
 
 ## Asset Preload
 

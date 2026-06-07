@@ -25,10 +25,12 @@ import { startBackgroundMusicSession } from "@/utils/backgroundMusic";
 import {
   createMiniGameResult,
   getServerApiErrorMessage,
-  playMiniGameEconomy,
+  rewardMiniGameEconomy,
+  startMiniGameEconomy,
 } from "@/utils/serverApi";
 import { playSoundEffect } from "@/utils/soundEffects";
 import { getXpProgressInfo } from "@/utils/xpProgress";
+import { useQueryClient } from "@tanstack/react-query";
 import * as Haptics from "expo-haptics";
 import { Image as ExpoImage } from "expo-image";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
@@ -339,6 +341,7 @@ const BookCatchFallingItem = memo(
 BookCatchFallingItem.displayName = "BookCatchFallingItem";
 
 const CatchTheMajorPlayScreen = () => {
+  const queryClient = useQueryClient();
   const canPlayMiniGame = useRequirePlayableSession();
   const { mode } = useLocalSearchParams<{ mode?: string }>();
   const difficulty: BookCatchDifficulty =
@@ -351,6 +354,16 @@ const CatchTheMajorPlayScreen = () => {
     (state) => state.consumeMiniGameHeart,
   );
   const friendList = useGameStore((state) => state.friendList);
+  const isGuestMode = useGameStore((state) => state.isGuestMode);
+  const applyServerUnlockedAchievements = useGameStore(
+    (state) => state.applyServerUnlockedAchievements,
+  );
+  const recordMiniGameResult = useGameStore(
+    (state) => state.recordMiniGameResult,
+  );
+  const recordServerMiniGamePlay = useGameStore(
+    (state) => state.recordServerMiniGamePlay,
+  );
   const setGameState = useGameStore((state) => state.setGameState);
   const totalXp = useGameStore((state) => state.totalXp);
   const xpProgress = useMemo(() => getXpProgressInfo(totalXp), [totalXp]);
@@ -370,6 +383,13 @@ const CatchTheMajorPlayScreen = () => {
   });
   const [coinRewardAmount, setCoinRewardAmount] =
     useState(SUCCESS_COIN_REWARD);
+  const [restartErrorAlert, setRestartErrorAlert] = useState({
+    id: 0,
+    message: "하트가 부족해서 다시 시작할 수 없어요.",
+    title: "미니게임 시작 실패",
+    visible: false,
+  });
+  const [isRestartingRound, setIsRestartingRound] = useState(false);
   const booLaneRef = useRef(1);
   const nextItemIdRef = useRef(1);
   const gameStartedAtMsRef = useRef(0);
@@ -379,6 +399,10 @@ const CatchTheMajorPlayScreen = () => {
   const collectedScoreItemCountRef = useRef(0);
   const didRewardCoinRef = useRef(false);
   const didSubmitResultRef = useRef(false);
+  const isStartingMiniGameSessionRef = useRef(false);
+  const isRestartingRoundRef = useRef(false);
+  const pendingSessionFinalizationRef = useRef<Promise<void> | null>(null);
+  const playSessionIdRef = useRef<string | null>(null);
   const booLaneSharedValue = useSharedValue(1);
   const booTranslateX = useSharedValue(0);
   const shakeX = useSharedValue(0);
@@ -397,7 +421,7 @@ const CatchTheMajorPlayScreen = () => {
     [collectedScoreItemCount],
   );
   const currentRank = useMemo(() => {
-    if (accessToken) {
+    if (accessToken || isGuestMode) {
       return null;
     }
 
@@ -408,7 +432,7 @@ const CatchTheMajorPlayScreen = () => {
     ).length;
 
     return higherScoreCount + 1;
-  }, [accessToken, friendList, isInfiniteMode, score]);
+  }, [accessToken, friendList, isGuestMode, isInfiniteMode, score]);
 
   const getLaneLeft = useCallback(
     (laneIndex: number, itemWidth: number) => {
@@ -514,6 +538,75 @@ const CatchTheMajorPlayScreen = () => {
     shakeY,
   ]);
 
+  const startMiniGameRound = useCallback(async () => {
+    if (isStartingMiniGameSessionRef.current) {
+      return false;
+    }
+
+    isStartingMiniGameSessionRef.current = true;
+    playSessionIdRef.current = null;
+
+    try {
+      if (accessToken) {
+        const startResult = await startMiniGameEconomy(
+          {
+            game_type: "catchTheMajor",
+            mode: isInfiniteMode ? "infinite" : "normal",
+          },
+          accessToken,
+        );
+
+        playSessionIdRef.current = startResult.play_session_id;
+        setGameState({
+          heart: startResult.heart,
+          heartUpdatedAt:
+            startResult.heart_updated_at ??
+            (startResult.spent_heart > 0
+              ? new Date().toISOString()
+              : useGameStore.getState().heartUpdatedAt),
+          maxHeart: startResult.max_heart,
+        });
+        applyServerUnlockedAchievements(startResult.unlocked_achievements);
+        recordServerMiniGamePlay();
+      } else if (!consumeMiniGameHeart()) {
+        setRestartErrorAlert((currentAlert) => ({
+          id: currentAlert.id + 1,
+          message: "하트가 부족해서 다시 시작할 수 없어요.",
+          title: "미니게임 시작 실패",
+          visible: true,
+        }));
+        return false;
+      }
+
+      setCountdownValue(3);
+      setGamePhase("countdown");
+      return true;
+    } catch (error) {
+      const errorMessage = getServerApiErrorMessage(
+        error,
+        "미니게임을 시작할 수 없어요.",
+      );
+
+      console.warn("전공책 받기 시작 실패", errorMessage);
+      setRestartErrorAlert((currentAlert) => ({
+        id: currentAlert.id + 1,
+        message: errorMessage,
+        title: "미니게임 시작 실패",
+        visible: true,
+      }));
+      return false;
+    } finally {
+      isStartingMiniGameSessionRef.current = false;
+    }
+  }, [
+    accessToken,
+    applyServerUnlockedAchievements,
+    consumeMiniGameHeart,
+    isInfiniteMode,
+    recordServerMiniGamePlay,
+    setGameState,
+  ]);
+
   useEffect(() => {
     if (
       !canPlayMiniGame ||
@@ -524,19 +617,13 @@ const CatchTheMajorPlayScreen = () => {
       return;
     }
 
-    if (!consumeMiniGameHeart()) {
-      router.replace("/miniGame/catchTheMajor");
-      return;
-    }
-
-    setCountdownValue(3);
-    setGamePhase("countdown");
+    void startMiniGameRound();
   }, [
     areAssetsReady,
     canPlayMiniGame,
-    consumeMiniGameHeart,
     gamePhase,
     hasGameArea,
+    startMiniGameRound,
   ]);
 
   useEffect(() => {
@@ -617,9 +704,14 @@ const CatchTheMajorPlayScreen = () => {
     shakeY.value = 0;
     shakeRotate.value = 0;
     didRewardCoinRef.current = false;
+    didSubmitResultRef.current = false;
     obstacleHitCountRef.current = 0;
     collectedScoreItemCountRef.current = 0;
     setCoinRewardAlert((currentAlert) => ({
+      ...currentAlert,
+      visible: false,
+    }));
+    setRestartErrorAlert((currentAlert) => ({
       ...currentAlert,
       visible: false,
     }));
@@ -652,6 +744,13 @@ const CatchTheMajorPlayScreen = () => {
     }));
   }, []);
 
+  const hideRestartErrorAlert = useCallback(() => {
+    setRestartErrorAlert((currentAlert) => ({
+      ...currentAlert,
+      visible: false,
+    }));
+  }, []);
+
   const removeFallingItem = useCallback((id: number) => {
     setFallingItems((currentItems) =>
       currentItems.filter((item) => item.id !== id),
@@ -659,64 +758,142 @@ const CatchTheMajorPlayScreen = () => {
   }, []);
 
   const submitMiniGameResult = useCallback(
-    (finalScore: number, success: boolean, playTimeSeconds: number) => {
+    async (finalScore: number, success: boolean, playTimeSeconds: number) => {
       if (!accessToken || didSubmitResultRef.current) {
         return;
       }
 
       didSubmitResultRef.current = true;
 
-      void createMiniGameResult(
-        {
-          game_type: "catchTheMajor",
-          location: "library",
-          play_time_seconds: playTimeSeconds,
-          score: finalScore,
-          success,
-        },
-        accessToken,
-      ).catch((error) => {
+      try {
+        const result = await createMiniGameResult(
+          {
+            game_type: "catchTheMajor",
+            ended_reason: success ? "success" : "failed",
+            location: "library",
+            mode: isInfiniteMode ? "infinite" : "normal",
+            play_session_id: playSessionIdRef.current,
+            play_time_seconds: playTimeSeconds,
+            score: finalScore,
+            success,
+          },
+          accessToken,
+        );
+
+        applyServerUnlockedAchievements(result.unlocked_achievements);
+        void queryClient.invalidateQueries({
+          queryKey: ["minigames", "rankings"],
+        });
+      } catch (error) {
         console.warn(
           "전공책 받기 결과 저장 실패",
           getServerApiErrorMessage(error, "미니게임 결과 저장 실패"),
         );
-      });
+      }
     },
-    [accessToken],
+    [accessToken, applyServerUnlockedAchievements, isInfiniteMode, queryClient],
   );
 
-  const applyMiniGameSuccessReward = useCallback(async () => {
+  const applyMiniGameSuccessReward = useCallback(async (finalScore: number) => {
+    const optimisticRewardCoin = SUCCESS_COIN_REWARD;
+
+    adjustCoin(optimisticRewardCoin);
+    showCoinRewardAlert(optimisticRewardCoin);
+
     if (!accessToken) {
-      adjustCoin(SUCCESS_COIN_REWARD);
-      showCoinRewardAlert(SUCCESS_COIN_REWARD);
+      return;
+    }
+
+    if (!playSessionIdRef.current) {
+      console.warn("전공책 받기 보상 동기화 실패: play_session_id 없음");
+      adjustCoin(-optimisticRewardCoin);
       return;
     }
 
     try {
-      const rewardResult = await playMiniGameEconomy(accessToken);
+      const rewardResult = await rewardMiniGameEconomy(
+        {
+          game_type: "catchTheMajor",
+          mode: isInfiniteMode ? "infinite" : "normal",
+          play_session_id: playSessionIdRef.current,
+          score: finalScore,
+        },
+        accessToken,
+      );
 
       setGameState({
         coin: rewardResult.coin,
-        heart: rewardResult.heart,
-        heartUpdatedAt:
-          rewardResult.spent_heart > 0
-            ? new Date().toISOString()
-            : useGameStore.getState().heartUpdatedAt,
-        maxHeart: rewardResult.max_heart,
+      });
+      applyServerUnlockedAchievements(rewardResult.unlocked_achievements, {
+        coin: rewardResult.coin,
+      });
+      void queryClient.invalidateQueries({
+        queryKey: ["minigames", "rankings"],
       });
 
-      if (rewardResult.awarded_coin > 0) {
-        showCoinRewardAlert(rewardResult.awarded_coin);
-      }
     } catch (error) {
+      adjustCoin(-optimisticRewardCoin);
       console.warn(
         "전공책 받기 보상 동기화 실패",
         getServerApiErrorMessage(error, "미니게임 보상 동기화 실패"),
       );
-      adjustCoin(SUCCESS_COIN_REWARD);
-      showCoinRewardAlert(SUCCESS_COIN_REWARD);
     }
-  }, [accessToken, adjustCoin, setGameState, showCoinRewardAlert]);
+  }, [
+    accessToken,
+    adjustCoin,
+    applyServerUnlockedAchievements,
+    isInfiniteMode,
+    queryClient,
+    setGameState,
+    showCoinRewardAlert,
+  ]);
+
+  const finalizeMiniGameSession = useCallback(
+    (
+      finalScore: number,
+      success: boolean,
+      playTimeSeconds: number,
+      shouldReward: boolean,
+    ) => {
+      recordMiniGameResult("catchTheMajor", finalScore);
+
+      const resultPromise = submitMiniGameResult(
+        finalScore,
+        success,
+        playTimeSeconds,
+      );
+      const rewardPromise =
+        shouldReward && !didRewardCoinRef.current
+          ? (() => {
+              didRewardCoinRef.current = true;
+
+              return applyMiniGameSuccessReward(finalScore);
+            })()
+          : Promise.resolve();
+      const finalizationPromise = Promise.allSettled([
+        resultPromise,
+        rewardPromise,
+      ]).then(() => undefined);
+
+      pendingSessionFinalizationRef.current = finalizationPromise;
+      void finalizationPromise.finally(() => {
+        if (pendingSessionFinalizationRef.current === finalizationPromise) {
+          pendingSessionFinalizationRef.current = null;
+        }
+      });
+
+      return finalizationPromise;
+    },
+    [applyMiniGameSuccessReward, recordMiniGameResult, submitMiniGameResult],
+  );
+
+  const waitForPendingSessionFinalization = useCallback(async () => {
+    const pendingSessionFinalization = pendingSessionFinalizationRef.current;
+
+    if (pendingSessionFinalization) {
+      await pendingSessionFinalization;
+    }
+  }, []);
 
   const triggerObstacleImpact = useCallback((point: number) => {
     const { haptic, shake } = getObstacleImpactIntensity(point);
@@ -779,7 +956,7 @@ const CatchTheMajorPlayScreen = () => {
             Math.max(0, Date.now() - gameStartedAtMsRef.current) / 1000,
           );
 
-          submitMiniGameResult(finalScore, true, elapsedSeconds);
+          finalizeMiniGameSession(finalScore, true, elapsedSeconds, false);
           gamePhaseRef.current = "finished";
           setFallingItems([]);
           setGamePhase("finished");
@@ -798,9 +975,9 @@ const CatchTheMajorPlayScreen = () => {
 
     setScore((currentScore) => Math.max(0, currentScore + point));
   }, [
+    finalizeMiniGameSession,
     isInfiniteMode,
     removeFallingItem,
-    submitMiniGameResult,
     triggerObstacleImpact,
   ]);
 
@@ -855,16 +1032,12 @@ const CatchTheMajorPlayScreen = () => {
         const didClear = finalScore >= SUCCESS_SCORE_THRESHOLD;
 
         clearInterval(timer);
-        submitMiniGameResult(
+        finalizeMiniGameSession(
           finalScore,
           didClear,
           Math.round(GAME_DURATION_MS / 1000),
+          didClear,
         );
-
-        if (didClear && !didRewardCoinRef.current) {
-          didRewardCoinRef.current = true;
-          void applyMiniGameSuccessReward();
-        }
 
         setFallingItems([]);
         gamePhaseRef.current = "finished";
@@ -876,11 +1049,10 @@ const CatchTheMajorPlayScreen = () => {
       clearInterval(timer);
     };
   }, [
-    applyMiniGameSuccessReward,
+    finalizeMiniGameSession,
     gamePhase,
     hasGameArea,
     isInfiniteMode,
-    submitMiniGameResult,
   ]);
 
   useEffect(() => {
@@ -931,15 +1103,32 @@ const CatchTheMajorPlayScreen = () => {
     router.replace("/miniGame/catchTheMajor");
   };
 
-  const handleRestartPress = () => {
-    if (!consumeMiniGameHeart()) {
-      router.replace("/miniGame/catchTheMajor");
+  const handleRestartPress = async () => {
+    if (
+      isStartingMiniGameSessionRef.current ||
+      isRestartingRoundRef.current
+    ) {
       return;
     }
 
-    resetRoundState();
-    setCountdownValue(3);
-    setGamePhase("countdown");
+    isRestartingRoundRef.current = true;
+    setIsRestartingRound(true);
+
+    try {
+      await waitForPendingSessionFinalization();
+      const didStart = await startMiniGameRound();
+
+      if (didStart) {
+        resetRoundState();
+        return;
+      }
+
+      gamePhaseRef.current = "finished";
+      setGamePhase("finished");
+    } finally {
+      isRestartingRoundRef.current = false;
+      setIsRestartingRound(false);
+    }
   };
 
   const handleGameAreaLayout = (event: LayoutChangeEvent) => {
@@ -1176,6 +1365,7 @@ const CatchTheMajorPlayScreen = () => {
                 width={128}
               />
               <MainButton
+                disabled={isRestartingRound}
                 height={60}
                 label="> 다시시작"
                 onPress={handleRestartPress}
@@ -1187,10 +1377,19 @@ const CatchTheMajorPlayScreen = () => {
         </View>
       ) : null}
 
-      <View pointerEvents="box-none" style={styles.touchLayer}>
-        <Pressable onPressIn={() => moveBoo(-1)} style={styles.touchZone} />
-        <Pressable onPressIn={() => moveBoo(1)} style={styles.touchZone} />
-      </View>
+      {gamePhase === "playing" ? (
+        <View pointerEvents="box-none" style={styles.touchLayer}>
+          <Pressable onPressIn={() => moveBoo(-1)} style={styles.touchZone} />
+          <Pressable onPressIn={() => moveBoo(1)} style={styles.touchZone} />
+        </View>
+      ) : null}
+      <TopAlert
+        message={restartErrorAlert.message}
+        onClose={hideRestartErrorAlert}
+        title={restartErrorAlert.title}
+        visibilityKey={restartErrorAlert.id}
+        visible={restartErrorAlert.visible}
+      />
     </View>
   );
 };

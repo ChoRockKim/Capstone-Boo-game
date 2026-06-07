@@ -14,4 +14,5 @@ export const mapGuestbookOutToListEntry = (
   authorName: entry.writer_nickname,
   id: `server-guestbook-${entry.entry_id}`,
   message: entry.content,
+  serverEntryId: entry.entry_id,
 });

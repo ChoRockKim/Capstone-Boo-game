@@ -38,15 +38,27 @@ import {
 } from "@/components/Room/RoomData";
 import {
   ACHIEVEMENT_DEFINITIONS,
+  type AchievementConditionType,
   type AchievementReward,
   type AchievementSkinKey,
   type UnlockedAchievement,
 } from "@/constants/achievements";
-import { CharacterGrade, CharacterState } from "@/constants/character";
 import {
+  CharacterCostumeKey,
+  CharacterGrade,
+  CharacterLifeStage,
+  CharacterState,
+} from "@/constants/character";
+import {
+  type AchievementProgress,
+  listMyAchievementProgress,
   setBooApiAccessToken,
   setBooApiTokenRefreshHandlers,
+  type ServerUnlockedAchievement,
+  sendAchievementEvent,
+  updateCurrentUserPreferences,
   updateCharacter,
+  updateMyCharacter,
 } from "@/utils/serverApi";
 import { consumeMiniGameHeart } from "@/utils/miniGameHeart";
 import { getTotalXpForGrade, getXpProgressInfo } from "@/utils/xpProgress";
@@ -61,6 +73,11 @@ const DEFAULT_CHARACTER_STATE: CharacterState = "basic1";
 const DEFAULT_MASTER_VOLUME = 1;
 const DEFAULT_BGM_VOLUME = 1;
 const DEFAULT_SFX_VOLUME = 1;
+const GUEST_DEFAULT_STUDENT_ID = "00000000";
+const GUEST_DEFAULT_USER_NAME = "외대생";
+const GUEST_DEFAULT_USER_NICKNAME = "부";
+const LEGACY_DEFAULT_STUDENT_ID = "202101108";
+const LEGACY_DEFAULT_USER_NAME = "김외대";
 const noopStorage: StateStorage = {
   getItem: async () => null,
   removeItem: async () => {},
@@ -85,6 +102,7 @@ export type PendingEvolution = {
   readyAt: number | null;
   resumeState: CharacterState;
   toGrade: CharacterGrade;
+  toLifeStage: CharacterLifeStage;
   trigger: EvolutionTrigger;
 };
 
@@ -121,9 +139,50 @@ export type AchievementStats = {
   hasFirstLogin: boolean;
   hasVisitedCampus: boolean;
   hasEnteredRoom: boolean;
+  miniGameBestScores: {
+    catchBoo: number;
+    catchTheMajor: number;
+    freeThrow: number;
+  };
   miniGamePlayCount: number;
   quizCorrectCount: number;
   roomItemEquipCount: number;
+};
+
+type GuestGameSnapshot = {
+  achievementStats: AchievementStats;
+  appliedSkippedMealPenaltyCount: number;
+  booName: string;
+  characterCostumeKey: CharacterCostumeKey;
+  characterState: CharacterState;
+  coin: number;
+  completedAchievementKeys: string[];
+  equippedRoomItems: EquippedRoomItems;
+  equippedRoomWallpaper: RoomWallpaperId;
+  friendList: FriendListItem[];
+  guestbookEntries: GuestbookEntriesByFriendId;
+  hasSeenGameTutorial: boolean;
+  hasSeenMiniGameTutorial: boolean;
+  heart: number;
+  heartUpdatedAt: string | null;
+  lastFedMeals: MealHistory;
+  lastFedMealSlotIndex: number;
+  maxHeart: number;
+  mealDayMode: MealDayMode;
+  mealRestrictionEnabled: boolean;
+  ownedAchievementSkins: AchievementSkinKey[];
+  ownedRoomItems: RoomItemId[];
+  ownedRoomWallpapers: RoomWallpaperId[];
+  quizAttemptHistory: QuizAttemptHistory;
+  quizDailyCount: number;
+  quizDailyCountDateKey: string;
+  quizDailyLimitEnabled: boolean;
+  skippedMealCount: number;
+  studentId: string;
+  totalXp: number;
+  userCreatedAt: string | null;
+  userName: string;
+  userNickname: string;
 };
 
 type GameStoreState = {
@@ -133,6 +192,7 @@ type GameStoreState = {
   achievementAlertQueue: UnlockedAchievement[];
   achievementStats: AchievementStats;
   booName: string;
+  characterCostumeKey: CharacterCostumeKey;
   characterState: CharacterState;
   coin: number;
   developerModeEnabled: boolean;
@@ -140,8 +200,10 @@ type GameStoreState = {
   equippedRoomWallpaper: RoomWallpaperId;
   friendList: FriendListItem[];
   guestbookEntries: GuestbookEntriesByFriendId;
+  guestGameSnapshot: GuestGameSnapshot | null;
   hasSeenGameTutorial: boolean;
   hasSeenMiniGameTutorial: boolean;
+  hasSyncedServerAchievements: boolean;
   heart: number;
   heartUpdatedAt: string | null;
   isGuestMode: boolean;
@@ -167,6 +229,7 @@ type GameStoreState = {
   sfxVolume: number;
   studentId: string;
   totalXp: number;
+  userCreatedAt: string | null;
   userEmail: string;
   userEmailVerified: boolean;
   userId: number | null;
@@ -190,13 +253,22 @@ type GameStoreActions = {
     countAchievement?: boolean;
     mealSectionId: MealSectionId | null;
     totalXp: number;
+    unlockedAchievements?: ServerUnlockedAchievement[];
   }) => void;
   applyServerQuizSubmit: (result: {
     coin: number;
     countAchievement?: boolean;
     isCorrect: boolean;
     totalXp: number;
+    unlockedAchievements?: ServerUnlockedAchievement[];
   }) => void;
+  applyServerUnlockedAchievements: (
+    unlockedAchievements?: ServerUnlockedAchievement[] | null,
+    syncState?: {
+      coin?: number;
+      totalXp?: number;
+    },
+  ) => void;
   clearPendingEvolution: () => void;
   clearAuthSession: () => void;
   clearMealHistory: () => void;
@@ -210,16 +282,24 @@ type GameStoreActions = {
   ) => RoomWallpaperPurchaseResult;
   removeFriend: (friendId: string) => void;
   recordCampusVisit: () => void;
+  recordMiniGameResult: (
+    gameId: keyof AchievementStats["miniGameBestScores"],
+    score: number,
+  ) => void;
+  recordServerMiniGamePlay: () => void;
   recordRoomEnter: () => void;
   recordRoomItemEquip: () => void;
+  resetGuestGameData: () => void;
   resetGameState: () => void;
   setAuthSession: (session: {
     accessToken: string;
     autoLoginEnabled: boolean;
     refreshToken: string;
+    unlockedAchievements?: ServerUnlockedAchievement[] | null;
   }) => void;
   setBooName: (booName: string) => void;
   setCharacterState: (characterState: CharacterState) => void;
+  setCharacterCostumeKey: (characterCostumeKey: CharacterCostumeKey) => void;
   setCoin: (coin: number) => void;
   setDeveloperModeEnabled: (enabled: boolean) => void;
   setEquippedRoomItem: (slotId: RoomSlotId, itemId: RoomItemId) => void;
@@ -228,6 +308,9 @@ type GameStoreActions = {
   setGameState: (
     patch: Partial<GameStoreState>,
     options?: { resolveAchievements?: boolean },
+  ) => void;
+  syncServerAchievementProgress: (
+    achievements?: AchievementProgress[] | null,
   ) => void;
   setHasSeenGameTutorial: (hasSeenGameTutorial: boolean) => void;
   setHasSeenMiniGameTutorial: (hasSeenMiniGameTutorial: boolean) => void;
@@ -280,6 +363,11 @@ const createInitialGameState = (): GameStoreState => ({
     hasFirstLogin: false,
     hasVisitedCampus: false,
     hasEnteredRoom: false,
+    miniGameBestScores: {
+      catchBoo: 0,
+      catchTheMajor: 0,
+      freeThrow: 0,
+    },
     miniGamePlayCount: 0,
     quizCorrectCount: 0,
     roomItemEquipCount: 0,
@@ -292,11 +380,14 @@ const createInitialGameState = (): GameStoreState => ({
   equippedRoomWallpaper: DEFAULT_EQUIPPED_ROOM_WALLPAPER,
   friendList: [],
   guestbookEntries: {},
+  guestGameSnapshot: null,
   hasSeenGameTutorial: false,
   hasSeenMiniGameTutorial: false,
+  hasSyncedServerAchievements: false,
   heart: 5,
   heartUpdatedAt: null,
   isGuestMode: false,
+  characterCostumeKey: "default",
   characterState: DEFAULT_CHARACTER_STATE,
   lastFedMeals: {},
   lastFedMealSlotIndex: getLatestCompletedMealSlotIndex(),
@@ -320,6 +411,7 @@ const createInitialGameState = (): GameStoreState => ({
   sfxVolume: DEFAULT_SFX_VOLUME,
   studentId: "202101108",
   totalXp: 0,
+  userCreatedAt: new Date().toISOString(),
   userEmail: "",
   userEmailVerified: false,
   userId: null,
@@ -331,6 +423,96 @@ export const initialGameState: GameStoreState = createInitialGameState();
 
 let eatingTimeoutRef: ReturnType<typeof setTimeout> | null = null;
 let pendingEvolutionIdRef = 0;
+
+const normalizeAchievementStats = (
+  achievementStats?: Partial<AchievementStats> | null,
+): AchievementStats => {
+  const initialAchievementStats = createInitialGameState().achievementStats;
+
+  return {
+    ...initialAchievementStats,
+    ...achievementStats,
+    miniGameBestScores: {
+      ...initialAchievementStats.miniGameBestScores,
+      ...achievementStats?.miniGameBestScores,
+    },
+  };
+};
+
+const createGuestGameSnapshot = (
+  state: GameStoreState,
+): GuestGameSnapshot => ({
+  achievementStats: normalizeAchievementStats(state.achievementStats),
+  appliedSkippedMealPenaltyCount: state.appliedSkippedMealPenaltyCount,
+  booName: state.booName,
+  characterCostumeKey: state.characterCostumeKey,
+  characterState: state.characterState,
+  coin: state.coin,
+  completedAchievementKeys: [...state.completedAchievementKeys],
+  equippedRoomItems: { ...state.equippedRoomItems },
+  equippedRoomWallpaper: state.equippedRoomWallpaper,
+  friendList: [...state.friendList],
+  guestbookEntries: state.guestbookEntries,
+  hasSeenGameTutorial: state.hasSeenGameTutorial,
+  hasSeenMiniGameTutorial: state.hasSeenMiniGameTutorial,
+  heart: state.heart,
+  heartUpdatedAt: state.heartUpdatedAt,
+  lastFedMeals: { ...state.lastFedMeals },
+  lastFedMealSlotIndex: state.lastFedMealSlotIndex,
+  maxHeart: state.maxHeart,
+  mealDayMode: state.mealDayMode,
+  mealRestrictionEnabled: state.mealRestrictionEnabled,
+  ownedAchievementSkins: [...state.ownedAchievementSkins],
+  ownedRoomItems: [...state.ownedRoomItems],
+  ownedRoomWallpapers: [...state.ownedRoomWallpapers],
+  quizAttemptHistory: { ...state.quizAttemptHistory },
+  quizDailyCount: state.quizDailyCount,
+  quizDailyCountDateKey: state.quizDailyCountDateKey,
+  quizDailyLimitEnabled: state.quizDailyLimitEnabled,
+  skippedMealCount: state.skippedMealCount,
+  studentId:
+    !state.studentId || state.studentId === LEGACY_DEFAULT_STUDENT_ID
+      ? GUEST_DEFAULT_STUDENT_ID
+      : state.studentId,
+  totalXp: state.totalXp,
+  userCreatedAt: state.userCreatedAt,
+  userName:
+    !state.userName || state.userName === LEGACY_DEFAULT_USER_NAME
+      ? GUEST_DEFAULT_USER_NAME
+      : state.userName,
+  userNickname:
+    !state.userNickname || state.userNickname === LEGACY_DEFAULT_USER_NAME
+      ? GUEST_DEFAULT_USER_NICKNAME
+      : state.userNickname,
+});
+
+const getGuestStudentId = (studentId?: string | null) =>
+  !studentId || studentId === LEGACY_DEFAULT_STUDENT_ID
+    ? GUEST_DEFAULT_STUDENT_ID
+    : studentId;
+
+const getGuestUserName = (userName?: string | null) =>
+  !userName || userName === LEGACY_DEFAULT_USER_NAME
+    ? GUEST_DEFAULT_USER_NAME
+    : userName;
+
+const getGuestUserNickname = (userNickname?: string | null) =>
+  !userNickname || userNickname === LEGACY_DEFAULT_USER_NAME
+    ? GUEST_DEFAULT_USER_NICKNAME
+    : userNickname;
+
+const normalizeGuestGameSnapshot = (
+  snapshot?: GuestGameSnapshot | null,
+): GuestGameSnapshot | null =>
+  snapshot
+    ? {
+        ...snapshot,
+        achievementStats: normalizeAchievementStats(snapshot.achievementStats),
+        studentId: getGuestStudentId(snapshot.studentId),
+        userName: getGuestUserName(snapshot.userName),
+        userNickname: getGuestUserNickname(snapshot.userNickname),
+      }
+    : null;
 
 const clearEatingTimeout = () => {
   if (eatingTimeoutRef) {
@@ -363,17 +545,28 @@ const createPendingEvolution = ({
   const currentXpInfo = getXpProgressInfo(currentTotalXp);
   const nextXpInfo = getXpProgressInfo(nextTotalXp);
 
-  if (nextXpInfo.grade <= currentXpInfo.grade) {
+  if (nextXpInfo.lifeStage === currentXpInfo.lifeStage) {
     return currentPendingEvolution;
   }
 
   if (currentPendingEvolution) {
+    const toLifeStage =
+      nextXpInfo.lifeStage === "graduate"
+        ? "graduate"
+        : currentPendingEvolution.toLifeStage === "graduate"
+          ? "graduate"
+          : (Math.max(
+              currentPendingEvolution.toLifeStage,
+              nextXpInfo.grade,
+            ) as CharacterGrade);
+
     return {
       ...currentPendingEvolution,
       toGrade: Math.max(
         currentPendingEvolution.toGrade,
         nextXpInfo.grade,
       ) as CharacterGrade,
+      toLifeStage,
     };
   }
 
@@ -383,6 +576,7 @@ const createPendingEvolution = ({
     readyAt,
     resumeState: normalizeEvolutionResumeState(resumeState),
     toGrade: nextXpInfo.grade,
+    toLifeStage: nextXpInfo.lifeStage,
     trigger,
   };
 };
@@ -418,10 +612,139 @@ const getAchievementProgressValue = (
   }
 };
 
+const isAchievementSkinKey = (
+  value: string | null | undefined,
+): value is AchievementSkinKey =>
+  value === "skin_creation" ||
+  value === "skin_peace" ||
+  value === "skin_truth";
+
+const getServerAchievementReward = (
+  achievement: Pick<
+    ServerUnlockedAchievement | AchievementProgress,
+    "reward_item_key" | "reward_type" | "reward_value"
+  >,
+): AchievementReward => {
+  const rewardType = achievement.reward_type.toLowerCase();
+  const rewardValue = achievement.reward_value ?? undefined;
+  const reward: AchievementReward = {};
+
+  if (rewardType === "coin" && typeof rewardValue === "number") {
+    reward.coin = rewardValue;
+  }
+
+  if (
+    (rewardType === "xp" || rewardType === "xp_point") &&
+    typeof rewardValue === "number"
+  ) {
+    reward.xp = rewardValue;
+  }
+
+  if (
+    (rewardType === "skin" || rewardType === "item") &&
+    isAchievementSkinKey(achievement.reward_item_key)
+  ) {
+    reward.skinKey = achievement.reward_item_key;
+  }
+
+  return reward;
+};
+
+const getServerAchievementSkinKeys = (
+  achievements: Array<
+    Pick<
+      ServerUnlockedAchievement | AchievementProgress,
+      "reward_item_key" | "reward_type"
+    >
+  >,
+) =>
+  achievements.reduce<AchievementSkinKey[]>((skinKeys, achievement) => {
+    if (
+      (achievement.reward_type === "skin" ||
+        achievement.reward_type === "item") &&
+      isAchievementSkinKey(achievement.reward_item_key)
+    ) {
+      skinKeys.push(achievement.reward_item_key);
+    }
+
+    return skinKeys;
+  }, []);
+
+const getMaxServerAchievementProgressValue = (
+  achievements: AchievementProgress[],
+  conditionType: AchievementConditionType,
+) =>
+  achievements.reduce((maxProgress, achievement) => {
+    if (achievement.condition_type !== conditionType) {
+      return maxProgress;
+    }
+
+    return Math.max(maxProgress, achievement.progress_value);
+  }, 0);
+
+const hasCompletedServerAchievement = (
+  achievements: AchievementProgress[],
+  conditionType: AchievementConditionType,
+) =>
+  achievements.some(
+    (achievement) =>
+      achievement.condition_type === conditionType &&
+      (achievement.completed || achievement.claimed),
+  );
+
+const syncAchievementStatsFromServerProgress = (
+  currentStats: AchievementStats,
+  achievements: AchievementProgress[],
+): AchievementStats => ({
+  ...currentStats,
+  feedCount: Math.max(
+    currentStats.feedCount,
+    getMaxServerAchievementProgressValue(achievements, "feed_count"),
+  ),
+  friendAddCount: Math.max(
+    currentStats.friendAddCount,
+    getMaxServerAchievementProgressValue(achievements, "friend_count"),
+  ),
+  hasEnteredRoom:
+    currentStats.hasEnteredRoom ||
+    hasCompletedServerAchievement(achievements, "room_first_enter") ||
+    getMaxServerAchievementProgressValue(achievements, "room_first_enter") >= 1,
+  hasFirstLogin:
+    currentStats.hasFirstLogin ||
+    hasCompletedServerAchievement(achievements, "first_login") ||
+    getMaxServerAchievementProgressValue(achievements, "first_login") >= 1,
+  hasVisitedCampus:
+    currentStats.hasVisitedCampus ||
+    hasCompletedServerAchievement(achievements, "campus_first_visit") ||
+    getMaxServerAchievementProgressValue(achievements, "campus_first_visit") >=
+      1,
+  miniGameBestScores: {
+    catchBoo: currentStats.miniGameBestScores?.catchBoo ?? 0,
+    catchTheMajor: currentStats.miniGameBestScores?.catchTheMajor ?? 0,
+    freeThrow: currentStats.miniGameBestScores?.freeThrow ?? 0,
+  },
+  miniGamePlayCount: Math.max(
+    currentStats.miniGamePlayCount,
+    getMaxServerAchievementProgressValue(achievements, "minigame_play_count"),
+  ),
+  quizCorrectCount: Math.max(
+    currentStats.quizCorrectCount,
+    getMaxServerAchievementProgressValue(achievements, "quiz_correct_count"),
+  ),
+  roomItemEquipCount: Math.max(
+    currentStats.roomItemEquipCount,
+    getMaxServerAchievementProgressValue(achievements, "room_item_equip_count"),
+  ),
+});
+
 const resolveAchievementRewards = (
   nextState: GameStoreState,
   unlockedAt = new Date().toISOString(),
 ): Partial<GameStoreState> => {
+  if (nextState.accessToken) {
+    return nextState;
+  }
+
   let completedAchievementKeys = [...nextState.completedAchievementKeys];
   let coin = nextState.coin;
   let totalXp = nextState.totalXp;
@@ -670,6 +993,7 @@ export const useGameStore = create<GameStore>()(
         countAchievement = true,
         mealSectionId,
         totalXp,
+        unlockedAchievements,
       }) => {
         const todayKey = getLocalDateKey();
         const lastFedMealSlotIndex = mealSectionId
@@ -715,6 +1039,11 @@ export const useGameStore = create<GameStore>()(
           };
         });
 
+        get().applyServerUnlockedAchievements(unlockedAchievements, {
+          coin,
+          totalXp,
+        });
+
         eatingTimeoutRef = setTimeout(() => {
           eatingTimeoutRef = null;
           get().syncMealStatus(false);
@@ -725,6 +1054,7 @@ export const useGameStore = create<GameStore>()(
         countAchievement = true,
         isCorrect,
         totalXp,
+        unlockedAchievements,
       }) => {
         const nextTotalXp = Math.max(totalXp, 0);
 
@@ -753,17 +1083,25 @@ export const useGameStore = create<GameStore>()(
             ...resolveAchievementRewards(nextState),
           };
         });
+
+        get().applyServerUnlockedAchievements(unlockedAchievements, {
+          coin,
+          totalXp,
+        });
       },
       clearPendingEvolution: () => set({ pendingEvolution: null }),
       clearAuthSession: () => {
         setBooApiAccessToken(null);
 
-        set({
+        set((state) => ({
           accessToken: null,
           autoLoginEnabled: false,
+          guestGameSnapshot: state.isGuestMode
+            ? createGuestGameSnapshot(state)
+            : state.guestGameSnapshot,
           isGuestMode: false,
           refreshToken: null,
-        });
+        }));
       },
       clearMealHistory: () => {
         clearEatingTimeout();
@@ -830,6 +1168,74 @@ export const useGameStore = create<GameStore>()(
         set((state) => ({
           achievementAlertQueue: state.achievementAlertQueue.slice(1),
         })),
+      applyServerUnlockedAchievements: (
+        unlockedAchievements,
+        syncState = {},
+      ) => {
+        const achievements = unlockedAchievements ?? [];
+
+        set((state) => {
+          const completedKeySet = new Set(state.completedAchievementKeys);
+          const newlyUnlocked = achievements.filter(
+            (achievement) =>
+              !completedKeySet.has(achievement.achievement_key),
+          );
+          const nextCompletedAchievementKeys = [
+            ...state.completedAchievementKeys,
+            ...newlyUnlocked.map(
+              (achievement) => achievement.achievement_key,
+            ),
+          ];
+          const unlockedAt = new Date().toISOString();
+          const nextOwnedAchievementSkins = [
+            ...state.ownedAchievementSkins,
+          ];
+
+          getServerAchievementSkinKeys(newlyUnlocked).forEach((skinKey) => {
+            if (
+              skinKey &&
+              !nextOwnedAchievementSkins.includes(skinKey)
+            ) {
+              nextOwnedAchievementSkins.push(skinKey);
+            }
+          });
+
+          const nextTotalXp =
+            syncState.totalXp !== undefined
+              ? Math.max(syncState.totalXp, 0)
+              : state.totalXp;
+          const shouldSyncTotalXp =
+            syncState.totalXp !== undefined && nextTotalXp !== state.totalXp;
+
+          return {
+            achievementAlertQueue: [
+              ...state.achievementAlertQueue,
+              ...newlyUnlocked.map((achievement) => ({
+                key: achievement.achievement_key,
+                reward: getServerAchievementReward(achievement),
+                title: achievement.title,
+                unlockedAt,
+              })),
+            ],
+            coin:
+              syncState.coin !== undefined
+                ? Math.max(syncState.coin, 0)
+                : state.coin,
+            completedAchievementKeys: nextCompletedAchievementKeys,
+            ownedAchievementSkins: nextOwnedAchievementSkins,
+            pendingEvolution: shouldSyncTotalXp
+              ? createPendingEvolution({
+                  currentPendingEvolution: state.pendingEvolution,
+                  currentTotalXp: state.totalXp,
+                  nextTotalXp,
+                  resumeState: state.characterState,
+                  trigger: "xp",
+                })
+              : state.pendingEvolution,
+            totalXp: nextTotalXp,
+          };
+        });
+      },
       purchaseRoomItem: (itemId) => {
         const item = ROOM_ITEM_ASSETS[itemId];
 
@@ -1152,7 +1558,12 @@ export const useGameStore = create<GameStore>()(
         };
       },
       setUserName: (userName) => set({ userName }),
-      setAuthSession: ({ accessToken, autoLoginEnabled, refreshToken }) => {
+      setAuthSession: ({
+        accessToken,
+        autoLoginEnabled,
+        refreshToken,
+        unlockedAchievements,
+      }) => {
         setBooApiAccessToken(accessToken);
 
         set((state) => {
@@ -1164,6 +1575,7 @@ export const useGameStore = create<GameStore>()(
               hasFirstLogin: true,
             },
             autoLoginEnabled,
+            hasSyncedServerAchievements: false,
             isGuestMode: false,
             refreshToken,
           };
@@ -1173,11 +1585,23 @@ export const useGameStore = create<GameStore>()(
             ...resolveAchievementRewards(nextState),
           };
         });
+
+        get().applyServerUnlockedAchievements(unlockedAchievements);
       },
       setBooName: (booName) => {
         set({ booName });
 
-        const serverCharacterId = get().serverCharacterId;
+        const { accessToken, serverCharacterId } = get();
+
+        if (accessToken) {
+          void updateMyCharacter({ character_name: booName }, accessToken).catch(
+            (error) => {
+              console.warn("서버 캐릭터 이름 동기화 실패", error);
+            },
+          );
+
+          return;
+        }
 
         if (serverCharacterId !== null) {
           void updateCharacter(serverCharacterId, {
@@ -1190,7 +1614,10 @@ export const useGameStore = create<GameStore>()(
       setCoin: (coin) => set({ coin: Math.max(coin, 0) }),
       setDeveloperModeEnabled: (developerModeEnabled) =>
         set({ developerModeEnabled }),
-      setEquippedRoomItem: (slotId, itemId) =>
+      setEquippedRoomItem: (slotId, itemId) => {
+        const { accessToken } = get();
+        let didEquip = false;
+
         set((state) => {
           if (
             ROOM_ITEM_ASSETS[itemId]?.slotId !== slotId ||
@@ -1211,13 +1638,34 @@ export const useGameStore = create<GameStore>()(
               [slotId]: itemId,
             },
           };
+          didEquip = true;
 
           return {
             ...nextState,
             ...resolveAchievementRewards(nextState),
           };
-        }),
-      setEquippedRoomWallpaper: (wallpaperId) =>
+        });
+
+        if (accessToken && didEquip) {
+          void sendAchievementEvent("room_item_equip_count", accessToken)
+            .then((result) => {
+              get().applyServerUnlockedAchievements(
+                result.unlocked_achievements,
+                {
+                  coin: result.coin,
+                  totalXp: result.xp_point,
+                },
+              );
+            })
+            .catch((error) => {
+              console.warn("서버 마이룸 아이템 장착 업적 동기화 실패", error);
+            });
+        }
+      },
+      setEquippedRoomWallpaper: (wallpaperId) => {
+        const { accessToken } = get();
+        let didEquip = false;
+
         set((state) => {
           if (
             !ROOM_WALLPAPER_ASSETS[wallpaperId] ||
@@ -1235,17 +1683,59 @@ export const useGameStore = create<GameStore>()(
             },
             equippedRoomWallpaper: wallpaperId,
           };
+          didEquip = true;
 
           return {
             ...nextState,
             ...resolveAchievementRewards(nextState),
           };
-        }),
+        });
+
+        if (accessToken && didEquip) {
+          void sendAchievementEvent("room_item_equip_count", accessToken)
+            .then((result) => {
+              get().applyServerUnlockedAchievements(
+                result.unlocked_achievements,
+                {
+                  coin: result.coin,
+                  totalXp: result.xp_point,
+                },
+              );
+            })
+            .catch((error) => {
+              console.warn("서버 마이룸 아이템 장착 업적 동기화 실패", error);
+            });
+        }
+      },
       setFriendList: (friendList) => set({ friendList }),
-      setHasSeenGameTutorial: (hasSeenGameTutorial) =>
-        set({ hasSeenGameTutorial }),
-      setHasSeenMiniGameTutorial: (hasSeenMiniGameTutorial) =>
-        set({ hasSeenMiniGameTutorial }),
+      setHasSeenGameTutorial: (hasSeenGameTutorial) => {
+        set({ hasSeenGameTutorial });
+
+        const { accessToken } = get();
+
+        if (accessToken) {
+          void updateCurrentUserPreferences(
+            { has_seen_game_tutorial: hasSeenGameTutorial },
+            accessToken,
+          ).catch((error) => {
+            console.warn("서버 게임 튜토리얼 설정 저장 실패", error);
+          });
+        }
+      },
+      setHasSeenMiniGameTutorial: (hasSeenMiniGameTutorial) => {
+        set({ hasSeenMiniGameTutorial });
+
+        const { accessToken } = get();
+
+        if (accessToken) {
+          void updateCurrentUserPreferences(
+            { has_seen_minigame_tutorial: hasSeenMiniGameTutorial },
+            accessToken,
+          ).catch((error) => {
+            console.warn("서버 미니게임 튜토리얼 설정 저장 실패", error);
+          });
+        }
+      },
       setMasterVolume: (masterVolume) =>
         set({ masterVolume: clampVolume(masterVolume) }),
       setGrade: (grade) => set({ totalXp: getTotalXpForGrade(grade) }),
@@ -1254,6 +1744,17 @@ export const useGameStore = create<GameStore>()(
       setMealRestrictionEnabled: (mealRestrictionEnabled) =>
         set({ mealRestrictionEnabled }),
       setServerCharacterId: (serverCharacterId) => set({ serverCharacterId }),
+      setCharacterCostumeKey: (characterCostumeKey) =>
+        set((state) => {
+          if (
+            characterCostumeKey !== "default" &&
+            !state.ownedAchievementSkins.includes(characterCostumeKey)
+          ) {
+            return state;
+          }
+
+          return { characterCostumeKey };
+        }),
       setCharacterState: (characterState) => {
         if (characterState !== "eating") {
           clearEatingTimeout();
@@ -1267,7 +1768,17 @@ export const useGameStore = create<GameStore>()(
             (friend) => friend.id !== friendId,
           ),
         })),
-      recordCampusVisit: () =>
+      recordCampusVisit: () => {
+        const {
+          accessToken,
+          completedAchievementKeys,
+          hasSyncedServerAchievements,
+        } = get();
+        const shouldSendServerEvent =
+          !!accessToken &&
+          (!hasSyncedServerAchievements ||
+            !completedAchievementKeys.includes("campus_first_visit"));
+
         set((state) => {
           if (state.achievementStats.hasVisitedCampus) {
             return state;
@@ -1285,8 +1796,78 @@ export const useGameStore = create<GameStore>()(
             ...nextState,
             ...resolveAchievementRewards(nextState),
           };
-        }),
-      recordRoomEnter: () =>
+        });
+
+        if (shouldSendServerEvent) {
+          void sendAchievementEvent("campus_first_visit", accessToken)
+            .then((result) => {
+              get().applyServerUnlockedAchievements(
+                result.unlocked_achievements,
+                {
+                  coin: result.coin,
+                  totalXp: result.xp_point,
+                },
+              );
+
+              return listMyAchievementProgress(accessToken);
+            })
+            .then((achievements) => {
+              get().syncServerAchievementProgress(achievements);
+            })
+            .catch((error) => {
+              console.warn("서버 캠퍼스 방문 업적 동기화 실패", error);
+            });
+        }
+      },
+      recordMiniGameResult: (gameId, score) => {
+        const normalizedScore = Math.max(Math.floor(score), 0);
+
+        set((state) => {
+          const currentBestScores = state.achievementStats.miniGameBestScores ?? {
+            catchBoo: 0,
+            catchTheMajor: 0,
+            freeThrow: 0,
+          };
+
+          if (currentBestScores[gameId] >= normalizedScore) {
+            return state;
+          }
+
+          return {
+            achievementStats: {
+              ...state.achievementStats,
+              miniGameBestScores: {
+                ...currentBestScores,
+                [gameId]: normalizedScore,
+              },
+            },
+          };
+        });
+      },
+      recordServerMiniGamePlay: () => {
+        set((state) => ({
+          achievementStats: {
+            ...state.achievementStats,
+            miniGameBestScores: state.achievementStats.miniGameBestScores ?? {
+              catchBoo: 0,
+              catchTheMajor: 0,
+              freeThrow: 0,
+            },
+            miniGamePlayCount: state.achievementStats.miniGamePlayCount + 1,
+          },
+        }));
+      },
+      recordRoomEnter: () => {
+        const {
+          accessToken,
+          completedAchievementKeys,
+          hasSyncedServerAchievements,
+        } = get();
+        const shouldSendServerEvent =
+          !!accessToken &&
+          (!hasSyncedServerAchievements ||
+            !completedAchievementKeys.includes("room_first_enter"));
+
         set((state) => {
           if (state.achievementStats.hasEnteredRoom) {
             return state;
@@ -1304,8 +1885,32 @@ export const useGameStore = create<GameStore>()(
             ...nextState,
             ...resolveAchievementRewards(nextState),
           };
-        }),
-      recordRoomItemEquip: () =>
+        });
+
+        if (shouldSendServerEvent) {
+          void sendAchievementEvent("room_first_enter", accessToken)
+            .then((result) => {
+              get().applyServerUnlockedAchievements(
+                result.unlocked_achievements,
+                {
+                  coin: result.coin,
+                  totalXp: result.xp_point,
+                },
+              );
+
+              return listMyAchievementProgress(accessToken);
+            })
+            .then((achievements) => {
+              get().syncServerAchievementProgress(achievements);
+            })
+            .catch((error) => {
+              console.warn("서버 마이룸 진입 업적 동기화 실패", error);
+            });
+        }
+      },
+      recordRoomItemEquip: () => {
+        const { accessToken } = get();
+
         set((state) => {
           const nextState = {
             ...state,
@@ -1319,7 +1924,24 @@ export const useGameStore = create<GameStore>()(
             ...nextState,
             ...resolveAchievementRewards(nextState),
           };
-        }),
+        });
+
+        if (accessToken) {
+          void sendAchievementEvent("room_item_equip_count", accessToken)
+            .then((result) => {
+              get().applyServerUnlockedAchievements(
+                result.unlocked_achievements,
+                {
+                  coin: result.coin,
+                  totalXp: result.xp_point,
+                },
+              );
+            })
+            .catch((error) => {
+              console.warn("서버 마이룸 아이템 장착 업적 동기화 실패", error);
+            });
+        }
+      },
       setSfxVolume: (sfxVolume) => set({ sfxVolume: clampVolume(sfxVolume) }),
       setStudentId: (studentId) => set({ studentId }),
       setUserEmail: (userEmail) => set({ userEmail }),
@@ -1330,20 +1952,61 @@ export const useGameStore = create<GameStore>()(
         const {
           bgmVolume,
           developerModeEnabled,
+          guestGameSnapshot,
           masterVolume,
           sfxVolume,
         } = get();
 
-        set({
-          ...createInitialGameState(),
-          accessToken: null,
-          autoLoginEnabled: false,
-          bgmVolume,
-          developerModeEnabled,
-          isGuestMode: true,
-          masterVolume,
-          refreshToken: null,
-          sfxVolume,
+        set(() => {
+          const initialState = createInitialGameState();
+          const normalizedGuestGameSnapshot =
+            normalizeGuestGameSnapshot(guestGameSnapshot);
+          const restoredAchievementStats = normalizeAchievementStats(
+            normalizedGuestGameSnapshot?.achievementStats,
+          );
+          const nextOwnedAchievementSkins =
+            normalizedGuestGameSnapshot?.ownedAchievementSkins ?? [];
+          const nextCharacterCostumeKey =
+            normalizedGuestGameSnapshot?.characterCostumeKey === "default" ||
+            (normalizedGuestGameSnapshot?.characterCostumeKey &&
+              nextOwnedAchievementSkins.includes(
+                normalizedGuestGameSnapshot.characterCostumeKey,
+              ))
+              ? normalizedGuestGameSnapshot.characterCostumeKey
+              : "default";
+          const nextState = {
+            ...initialState,
+            ...normalizedGuestGameSnapshot,
+            accessToken: null,
+            achievementStats: {
+              ...restoredAchievementStats,
+              hasFirstLogin: true,
+            },
+            autoLoginEnabled: false,
+            bgmVolume,
+            characterCostumeKey: nextCharacterCostumeKey,
+            developerModeEnabled,
+            guestGameSnapshot: normalizedGuestGameSnapshot,
+            isGuestMode: true,
+            masterVolume,
+            refreshToken: null,
+            sfxVolume,
+            studentId: getGuestStudentId(
+              normalizedGuestGameSnapshot?.studentId,
+            ),
+            userCreatedAt:
+              normalizedGuestGameSnapshot?.userCreatedAt ??
+              initialState.userCreatedAt,
+            userName: getGuestUserName(normalizedGuestGameSnapshot?.userName),
+            userNickname: getGuestUserNickname(
+              normalizedGuestGameSnapshot?.userNickname,
+            ),
+          };
+
+          return {
+            ...nextState,
+            ...resolveAchievementRewards(nextState),
+          };
         });
       },
       setTotalXp: (totalXp) =>
@@ -1381,11 +2044,10 @@ export const useGameStore = create<GameStore>()(
       setGameState: (patch, options = {}) =>
         set((state) => {
           const nextState = { ...state, ...patch };
+          const shouldResolveAchievements =
+            options.resolveAchievements === true || patch.totalXp !== undefined;
 
-          if (
-            patch.totalXp === undefined ||
-            options.resolveAchievements === false
-          ) {
+          if (!shouldResolveAchievements || options.resolveAchievements === false) {
             return nextState;
           }
 
@@ -1394,18 +2056,105 @@ export const useGameStore = create<GameStore>()(
             ...resolveAchievementRewards(nextState),
           };
         }),
+      syncServerAchievementProgress: (achievements) => {
+        if (!achievements) {
+          return;
+        }
+
+        const progressList = achievements ?? [];
+        const completedAchievements = progressList.filter(
+          (achievement) => achievement.completed || achievement.claimed,
+        );
+
+        set((state) => {
+          const completedAchievementKeys = completedAchievements.map(
+            (achievement) => achievement.achievement_key,
+          );
+          const ownedAchievementSkins = [
+            ...new Set(getServerAchievementSkinKeys(completedAchievements)),
+          ];
+          const characterCostumeKey =
+            state.characterCostumeKey === "default" ||
+            ownedAchievementSkins.includes(state.characterCostumeKey)
+              ? state.characterCostumeKey
+              : "default";
+
+          return {
+            achievementStats: syncAchievementStatsFromServerProgress(
+              state.achievementStats,
+              progressList,
+            ),
+            characterCostumeKey,
+            completedAchievementKeys,
+            hasSyncedServerAchievements: true,
+            ownedAchievementSkins,
+          };
+        });
+      },
+      resetGuestGameData: () => {
+        clearEatingTimeout();
+        setBooApiAccessToken(null);
+
+        const {
+          bgmVolume,
+          developerModeEnabled,
+          masterVolume,
+          sfxVolume,
+        } = get();
+
+        set(() => {
+          const initialState = createInitialGameState();
+          const nextState = {
+            ...initialState,
+            accessToken: null,
+            achievementStats: {
+              ...initialState.achievementStats,
+              hasFirstLogin: true,
+            },
+            autoLoginEnabled: false,
+            bgmVolume,
+            developerModeEnabled,
+            guestGameSnapshot: null,
+            isGuestMode: true,
+            masterVolume,
+            refreshToken: null,
+            sfxVolume,
+            studentId: GUEST_DEFAULT_STUDENT_ID,
+            userName: GUEST_DEFAULT_USER_NAME,
+            userNickname: GUEST_DEFAULT_USER_NICKNAME,
+          };
+
+          return {
+            ...nextState,
+            ...resolveAchievementRewards(nextState),
+          };
+        });
+      },
       resetGameState: () => {
         clearEatingTimeout();
+        const isGuestMode = get().isGuestMode;
+        const initialState = createInitialGameState();
+
         set({
-          ...createInitialGameState(),
+          ...initialState,
           accessToken: get().accessToken,
           autoLoginEnabled: get().autoLoginEnabled,
           bgmVolume: get().bgmVolume,
           developerModeEnabled: get().developerModeEnabled,
+          guestGameSnapshot: get().guestGameSnapshot,
           isGuestMode: get().isGuestMode,
           masterVolume: get().masterVolume,
           refreshToken: get().refreshToken,
           sfxVolume: get().sfxVolume,
+          studentId: isGuestMode
+            ? GUEST_DEFAULT_STUDENT_ID
+            : initialState.studentId,
+          userName: isGuestMode
+            ? GUEST_DEFAULT_USER_NAME
+            : initialState.userName,
+          userNickname: isGuestMode
+            ? GUEST_DEFAULT_USER_NICKNAME
+            : initialState.userNickname,
         });
       },
     }),
@@ -1418,6 +2167,7 @@ export const useGameStore = create<GameStore>()(
         autoLoginEnabled: state.autoLoginEnabled,
         achievementStats: state.achievementStats,
         booName: state.booName,
+        characterCostumeKey: state.characterCostumeKey,
         characterState: state.characterState,
         coin: state.coin,
         completedAchievementKeys: state.completedAchievementKeys,
@@ -1426,6 +2176,7 @@ export const useGameStore = create<GameStore>()(
         equippedRoomWallpaper: state.equippedRoomWallpaper,
         friendList: state.friendList,
         guestbookEntries: state.guestbookEntries,
+        guestGameSnapshot: state.guestGameSnapshot,
         hasSeenGameTutorial: state.hasSeenGameTutorial,
         hasSeenMiniGameTutorial: state.hasSeenMiniGameTutorial,
         heart: state.heart,
@@ -1451,6 +2202,7 @@ export const useGameStore = create<GameStore>()(
         sfxVolume: state.sfxVolume,
         studentId: state.studentId,
         totalXp: state.totalXp,
+        userCreatedAt: state.userCreatedAt,
         userEmail: state.userEmail,
         userEmailVerified: state.userEmailVerified,
         userId: state.userId,
@@ -1464,6 +2216,21 @@ export const useGameStore = create<GameStore>()(
         if (!state) {
           return;
         }
+
+        const rehydratedAchievementStats = normalizeAchievementStats(
+          state.achievementStats,
+        );
+        const shouldResolveGuestFirstLogin =
+          state.isGuestMode && !state.accessToken;
+        const normalizedAchievementStats = {
+          ...rehydratedAchievementStats,
+          hasFirstLogin:
+            rehydratedAchievementStats.hasFirstLogin ||
+            shouldResolveGuestFirstLogin,
+        };
+        const rehydratedGuestGameSnapshot = normalizeGuestGameSnapshot(
+          state.guestGameSnapshot,
+        );
 
         if (state.autoLoginEnabled && state.accessToken) {
           setBooApiAccessToken(state.accessToken);
@@ -1500,10 +2267,31 @@ export const useGameStore = create<GameStore>()(
 
         state.setGameState({
           achievementAlertQueue: [],
+          achievementStats: normalizedAchievementStats,
+          characterCostumeKey:
+            state.characterCostumeKey === "default" ||
+            (state.ownedAchievementSkins ?? []).includes(
+              state.characterCostumeKey,
+            )
+              ? state.characterCostumeKey
+              : "default",
           equippedRoomItems,
+          guestGameSnapshot: rehydratedGuestGameSnapshot,
           ownedRoomItems: [...ownedRoomItems].filter(
             (itemId) => !!ROOM_ITEM_ASSETS[itemId],
           ),
+          studentId: shouldResolveGuestFirstLogin
+            ? getGuestStudentId(state.studentId)
+            : state.studentId,
+          userCreatedAt: state.userCreatedAt ?? new Date().toISOString(),
+          userName: shouldResolveGuestFirstLogin
+            ? getGuestUserName(state.userName)
+            : state.userName,
+          userNickname: shouldResolveGuestFirstLogin
+            ? getGuestUserNickname(state.userNickname)
+            : state.userNickname,
+        }, {
+          resolveAchievements: shouldResolveGuestFirstLogin,
         });
         state.syncMealStatus(false);
       },
@@ -1523,6 +2311,7 @@ setBooApiTokenRefreshHandlers({
       accessToken: token.access_token,
       autoLoginEnabled,
       refreshToken: token.refresh_token,
+      unlockedAchievements: token.unlocked_achievements,
     });
   },
 });

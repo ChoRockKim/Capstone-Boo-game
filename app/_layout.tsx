@@ -1,5 +1,5 @@
 /**
- * @description  앱 공통 초기화, Provider, Splash 제어, 폰트/이미지/사운드 preload를 담당합니다.
+ * @description  앱 공통 초기화, Provider, Splash 제어, 폰트/이미지/오디오 preload를 담당합니다.
  * @depends      stores/useGameStore.ts, utils/backgroundMusic.ts, utils/soundEffects.ts
  * @used-by      expo-router/entry
  * @side-effects SplashScreen 제어, 이미지/폰트/오디오 preload, Android navigation bar 설정
@@ -39,6 +39,10 @@ const preloadRequiredImageAssets = async () => {
   ]);
 };
 
+const preloadRequiredAudioAssets = () => {
+  preloadBackgroundMusicTracks();
+  preloadSoundEffects();
+};
 
 export default function RootLayout() {
   const [assetsLoaded, setAssetsLoaded] = useState(false);
@@ -71,6 +75,7 @@ export default function RootLayout() {
 
     const preloadAssets = async () => {
       await preloadRequiredImageAssets();
+      preloadRequiredAudioAssets();
 
       if (isMounted) {
         setAssetsLoaded(true);
@@ -87,8 +92,6 @@ export default function RootLayout() {
 
   useEffect(() => {
     if (loaded && assetsLoaded) {
-      preloadBackgroundMusicTracks();
-      preloadSoundEffects();
       SplashScreen.hideAsync();
     }
   }, [assetsLoaded, loaded]);

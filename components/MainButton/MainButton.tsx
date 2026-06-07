@@ -12,6 +12,7 @@ import Svg, { G, Path } from "react-native-svg";
 
 interface MainButtonProps {
   color?: "blue" | "gray";
+  disabled?: boolean;
   size?: "S" | "M";
   width?: number;
   height?: number;
@@ -97,6 +98,7 @@ function pixelPath(w: number, h: number): string {
 
 const MainButton = ({
   color = "blue",
+  disabled = false,
   size = "M",
   width,
   height,
@@ -109,6 +111,10 @@ const MainButton = ({
   const { fontSize, lineHeight } = defaults;
 
   const handlePress = () => {
+    if (disabled) {
+      return;
+    }
+
     playSoundEffect("basicClick");
     onPress?.();
   };
@@ -124,11 +130,15 @@ const MainButton = ({
   const innerH = H - 2 * innerOff;
 
   return (
-    <Pressable onPress={handlePress} style={{ width: W, height: H }}>
+    <Pressable
+      disabled={disabled}
+      onPress={handlePress}
+      style={{ width: W, height: H }}
+    >
       {({ pressed }) => {
         const p = pressed ? palette[color].active : palette[color].normal;
         return (
-          <View style={{ width: W, height: H }}>
+          <View style={[{ width: W, height: H }, disabled && styles.disabled]}>
             <Svg width={W} height={H} style={StyleSheet.absoluteFill}>
               {/* outer border + gap fill */}
               <G transform={`translate(${outerOff}, ${outerOff})`}>
@@ -164,6 +174,9 @@ const MainButton = ({
 };
 
 const styles = StyleSheet.create({
+  disabled: {
+    opacity: 0.55,
+  },
   textContainer: {
     alignItems: "center",
     justifyContent: "center",

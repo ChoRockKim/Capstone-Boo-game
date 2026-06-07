@@ -16,6 +16,7 @@ import {
 import { colors } from "@/constants/colors";
 import { fonts } from "@/constants/fonts";
 import { useGameStore } from "@/stores/useGameStore";
+import { updateMyCharacter } from "@/utils/serverApi";
 import { getXpProgressInfo } from "@/utils/xpProgress";
 import React, { useEffect, useMemo, useState } from "react";
 import {
@@ -29,6 +30,7 @@ import {
 
 interface DeveloperPanelProps {
   onActionFeedback: (title: string, message?: string) => void;
+  onOpenGraduationPreview: () => void;
   onMealStateChanged?: () => void;
   setIsDeveloperPanelOpen: (value: boolean) => void;
 }
@@ -140,9 +142,11 @@ const DeveloperInputRow = ({
 
 const DeveloperPanel = ({
   onActionFeedback,
+  onOpenGraduationPreview,
   onMealStateChanged,
   setIsDeveloperPanelOpen,
 }: DeveloperPanelProps) => {
+  const accessToken = useGameStore((state) => state.accessToken);
   const addSkippedMealForTest = useGameStore(
     (state) => state.addSkippedMealForTest,
   );
@@ -169,6 +173,9 @@ const DeveloperPanel = ({
   const setGrade = useGameStore((state) => state.setGrade);
   const setHasSeenGameTutorial = useGameStore(
     (state) => state.setHasSeenGameTutorial,
+  );
+  const setHasSeenMiniGameTutorial = useGameStore(
+    (state) => state.setHasSeenMiniGameTutorial,
   );
   const setMealDayMode = useGameStore((state) => state.setMealDayMode);
   const setStudentId = useGameStore((state) => state.setStudentId);
@@ -217,6 +224,29 @@ const DeveloperPanel = ({
 
   const showFeedback = (title: string, message?: string) => {
     onActionFeedback(title, message);
+  };
+
+  const handleCharacterStateChange = async (
+    nextCharacterState: CharacterState,
+  ) => {
+    setCharacterState(nextCharacterState);
+
+    const stateLabel = CHARACTER_STATE_LABELS[nextCharacterState];
+
+    if (!accessToken) {
+      showFeedback("부 상태를 변경했어요", stateLabel);
+      return;
+    }
+
+    showFeedback("부 상태 동기화 중", stateLabel);
+
+    try {
+      await updateMyCharacter({ state: nextCharacterState }, accessToken);
+      showFeedback("부 상태를 변경했어요", `${stateLabel} / 서버 반영 완료`);
+    } catch (error) {
+      console.warn("개발자 패널 서버 부 상태 동기화 실패", error);
+      showFeedback("서버 상태 동기화 실패", "로컬 상태만 변경됐어요");
+    }
   };
 
   const setInputError = (
@@ -456,6 +486,12 @@ const DeveloperPanel = ({
                   showFeedback("졸업 직전 XP로 이동했어요");
                 }}
               />
+              <DeveloperChipButton
+                label="졸업 화면 미리보기"
+                onPress={() => {
+                  onOpenGraduationPreview();
+                }}
+              />
             </View>
           </View>
 
@@ -468,11 +504,7 @@ const DeveloperPanel = ({
                   label={CHARACTER_STATE_LABELS[stateOption]}
                   active={characterState === stateOption}
                   onPress={() => {
-                    setCharacterState(stateOption);
-                    showFeedback(
-                      "부 상태를 변경했어요",
-                      CHARACTER_STATE_LABELS[stateOption],
-                    );
+                    void handleCharacterStateChange(stateOption);
                   }}
                 />
               ))}
@@ -591,13 +623,14 @@ const DeveloperPanel = ({
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>튜토리얼</Text>
             <Text style={styles.sectionDescription}>
-              다음 메인 게임 화면 진입 때 튜토리얼 안내를 다시 띄웁니다.
+              다음 메인 게임/미니게임 화면 진입 때 튜토리얼 안내를 다시 띄웁니다.
             </Text>
             <View style={styles.chipRow}>
               <DeveloperChipButton
                 label="튜토리얼 조회 초기화"
                 onPress={() => {
                   setHasSeenGameTutorial(false);
+                  setHasSeenMiniGameTutorial(false);
                   showFeedback("튜토리얼 조회 기록을 초기화했어요");
                 }}
               />

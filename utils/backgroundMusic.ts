@@ -7,11 +7,12 @@
 import { createAudioPlayer, type AudioPlayer } from "expo-audio";
 
 const BACKGROUND_MUSIC_SOURCES = {
-  main: require("@/assets/musics/bgm/main-ui.mp3"),
-  miniGameMain: require("@/assets/musics/bgm/minigame-main.mp3"),
-  miniGameIngame: require("@/assets/musics/bgm/minigame-ingame.mp3"),
-  myRoom: require("@/assets/musics/bgm/my-room.mp3"),
-  titleLogin: require("@/assets/musics/bgm/title-login.mp3"),
+  graduation: require("@/assets/musics/bgm/graduation.mp3"),
+  main: require("@/assets/musics/bgm/main-ui.m4a"),
+  miniGameMain: require("@/assets/musics/bgm/minigame-main.m4a"),
+  miniGameIngame: require("@/assets/musics/bgm/minigame-ingame.m4a"),
+  myRoom: require("@/assets/musics/bgm/my-room.m4a"),
+  titleLogin: require("@/assets/musics/bgm/title-login.m4a"),
 } as const;
 
 export type BackgroundMusicTrack = keyof typeof BACKGROUND_MUSIC_SOURCES;
@@ -19,6 +20,7 @@ export type BackgroundMusicTrack = keyof typeof BACKGROUND_MUSIC_SOURCES;
 const BACKGROUND_MUSIC_RETRY_DELAY_MS = 500;
 const DEFAULT_BACKGROUND_MUSIC_VOLUME = 0.14;
 const BACKGROUND_MUSIC_VOLUME_SCALE: Record<BackgroundMusicTrack, number> = {
+  graduation: 2,
   main: 1,
   miniGameMain: 1,
   miniGameIngame: 1,
@@ -119,6 +121,7 @@ const getBackgroundMusicPlayer = (
 
   const player = createAudioPlayer(BACKGROUND_MUSIC_SOURCES[track], {
     keepAudioSessionActive: true,
+    preferredForwardBufferDuration: 1,
   });
 
   player.loop = true;
@@ -235,7 +238,7 @@ export const restartBackgroundMusic = () => {
   pauseOtherBackgroundMusicTracks(currentBackgroundMusicTrack);
 
   void player
-    .seekTo(0)
+    .seekTo(0, 100, 100)
     .then(() => {
       try {
         player.play();
@@ -256,48 +259,31 @@ export const restartBackgroundMusic = () => {
     });
 };
 
-const playBackgroundMusicFromStart = () => {
+const playBackgroundMusicForSession = () => {
   isBackgroundMusicRequested = true;
 
-  const player = withExistingBackgroundMusicPlayer(
-    (activePlayer) => activePlayer,
-  );
+  const didPlay = withBackgroundMusicPlayer((player) => {
+    pauseOtherBackgroundMusicTracks(currentBackgroundMusicTrack);
 
-  if (!player) {
-    playBackgroundMusic();
+    if (!player.playing) {
+      try {
+        player.play();
+      } catch (error) {
+        console.warn("Failed to play background music.", error);
+        releaseBackgroundMusicPlayer(currentBackgroundMusicTrack);
+        return false;
+      }
+    }
+
+    return true;
+  });
+
+  if (didPlay) {
+    clearRetryTimer();
     return;
   }
 
-  pauseOtherBackgroundMusicTracks(currentBackgroundMusicTrack);
-
-  void player
-    .seekTo(0)
-    .then(() => {
-      try {
-        player.play();
-        clearRetryTimer();
-      } catch (error) {
-        console.warn(
-          "Failed to play background music from the beginning.",
-          error,
-        );
-        releaseBackgroundMusicPlayer(currentBackgroundMusicTrack);
-        scheduleBackgroundMusicRetry();
-      }
-    })
-    .catch(() => {
-      try {
-        player.play();
-        clearRetryTimer();
-      } catch (error) {
-        console.warn(
-          "Failed to play background music from the beginning.",
-          error,
-        );
-        releaseBackgroundMusicPlayer(currentBackgroundMusicTrack);
-        scheduleBackgroundMusicRetry();
-      }
-    });
+  scheduleBackgroundMusicRetry();
 };
 
 export const stopBackgroundMusic = () => {
@@ -357,7 +343,7 @@ export const startBackgroundMusicSession = (track: BackgroundMusicTrack) => {
 
   clearRetryTimer();
   changeBackgroundMusic(track);
-  playBackgroundMusicFromStart();
+  playBackgroundMusicForSession();
 
   return () => {
     if (activeBackgroundMusicSessionId !== sessionId) {
@@ -366,6 +352,37 @@ export const startBackgroundMusicSession = (track: BackgroundMusicTrack) => {
 
     activeBackgroundMusicSessionId = null;
     stopBackgroundMusic();
+  };
+};
+
+export const startTemporaryBackgroundMusic = (track: BackgroundMusicTrack) => {
+  const previousTrack = currentBackgroundMusicTrack;
+  const shouldRestorePlayback =
+    isBackgroundMusicRequested || isBackgroundMusicPlaying();
+
+  clearRetryTimer();
+  pauseBackgroundMusicTrack(previousTrack);
+  currentBackgroundMusicTrack = track;
+  restartBackgroundMusic();
+
+  let didRestore = false;
+
+  return () => {
+    if (didRestore) {
+      return;
+    }
+
+    didRestore = true;
+    clearRetryTimer();
+    pauseBackgroundMusicTrack(track);
+    currentBackgroundMusicTrack = previousTrack;
+
+    if (shouldRestorePlayback) {
+      playBackgroundMusicForSession();
+      return;
+    }
+
+    isBackgroundMusicRequested = false;
   };
 };
 
