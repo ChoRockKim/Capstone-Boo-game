@@ -19,6 +19,7 @@ import { useGameStore } from "@/stores/useGameStore";
 import {
   getServerApiErrorMessage,
   patchMyDebugState,
+  type DebugMePatch,
 } from "@/utils/serverApi";
 import { getTotalXpForGrade, getXpProgressInfo } from "@/utils/xpProgress";
 import React, { useEffect, useMemo, useState } from "react";
@@ -278,12 +279,7 @@ const DeveloperPanel = ({
     successTitle,
   }: {
     localApply: () => void;
-    patch: {
-      character_state?: string | null;
-      coin?: number | null;
-      stage?: number | null;
-      xp_point?: number | null;
-    };
+    patch: DebugMePatch;
     successMessage?: string;
     successTitle: string;
   }) => {
@@ -306,11 +302,15 @@ const DeveloperPanel = ({
 
       setGameState(
         {
+          booName: result.character?.character_name ?? undefined,
           coin: result.user.coin,
           ...(serverCharacterState
             ? { characterState: serverCharacterState }
             : {}),
+          skippedMealCount: result.character?.skipped_meal_count ?? undefined,
+          studentId: result.user.student_id,
           totalXp: result.user.xp_point,
+          userName: result.user.name,
         },
         { resolveAchievements: false },
       );
@@ -502,9 +502,13 @@ const DeveloperPanel = ({
                 }
 
                 const nextBooName = booNameInput.trim() || booName;
-                setBooName(nextBooName);
                 setInputError("booName");
-                showFeedback("부 이름을 변경했어요", nextBooName);
+                void applyDebugStatePatch({
+                  localApply: () => setBooName(nextBooName),
+                  patch: { character_name: nextBooName },
+                  successMessage: nextBooName,
+                  successTitle: "부 이름을 변경했어요",
+                });
               }}
             />
             <DeveloperInputRow
@@ -525,9 +529,13 @@ const DeveloperPanel = ({
                 }
 
                 const nextUserName = userNameInput.trim() || userName;
-                setUserName(nextUserName);
                 setInputError("userName");
-                showFeedback("유저 이름을 변경했어요", nextUserName);
+                void applyDebugStatePatch({
+                  localApply: () => setUserName(nextUserName),
+                  patch: { name: nextUserName },
+                  successMessage: nextUserName,
+                  successTitle: "유저 이름을 변경했어요",
+                });
               }}
             />
             <DeveloperInputRow
@@ -550,9 +558,13 @@ const DeveloperPanel = ({
                 }
 
                 const nextStudentId = studentIdInput.trim() || studentId;
-                setStudentId(nextStudentId);
                 setInputError("studentId");
-                showFeedback("학번을 변경했어요", nextStudentId);
+                void applyDebugStatePatch({
+                  localApply: () => setStudentId(nextStudentId),
+                  patch: { student_id: nextStudentId },
+                  successMessage: nextStudentId,
+                  successTitle: "학번을 변경했어요",
+                });
               }}
             />
           </View>
@@ -642,8 +654,12 @@ const DeveloperPanel = ({
                   label={option.label}
                   active={mealDayMode === option.value}
                   onPress={() => {
-                    setMealDayMode(option.value);
-                    showFeedback("학식 모드를 변경했어요", option.label);
+                    void applyDebugStatePatch({
+                      localApply: () => setMealDayMode(option.value),
+                      patch: { meal_day_mode: option.value },
+                      successMessage: option.label,
+                      successTitle: "학식 모드를 변경했어요",
+                    });
                   }}
                 />
               ))}
@@ -662,31 +678,45 @@ const DeveloperPanel = ({
               <DeveloperChipButton
                 label={`시간 제한 ${mealRestrictionEnabled ? "끄기" : "켜기"}`}
                 onPress={() => {
-                  toggleMealRestrictionEnabled();
-                  showFeedback(
-                    "식사 시간 제한을 변경했어요",
-                    mealRestrictionEnabled ? "OFF" : "ON",
-                  );
+                  const nextEnabled = !mealRestrictionEnabled;
+
+                  void applyDebugStatePatch({
+                    localApply: toggleMealRestrictionEnabled,
+                    patch: { meal_restriction_enabled: nextEnabled },
+                    successMessage: nextEnabled ? "ON" : "OFF",
+                    successTitle: "식사 시간 제한을 변경했어요",
+                  });
                 }}
               />
               <DeveloperChipButton
                 label="식사 기록 초기화"
                 onPress={() => {
-                  clearMealHistory();
-                  syncMealStatus(false);
-                  onMealStateChanged?.();
-                  showFeedback("식사 기록을 초기화했어요");
+                  void applyDebugStatePatch({
+                    localApply: () => {
+                      clearMealHistory();
+                      syncMealStatus(false);
+                      onMealStateChanged?.();
+                    },
+                    patch: { clear_meal_history: true },
+                    successTitle: "식사 기록을 초기화했어요",
+                  });
                 }}
               />
               <DeveloperChipButton
                 label="거른 끼니 +1"
                 onPress={() => {
-                  addSkippedMealForTest();
-                  onMealStateChanged?.();
-                  showFeedback(
-                    "거른 끼니를 추가했어요",
-                    `${useGameStore.getState().skippedMealCount}끼니`,
-                  );
+                  const nextSkippedMealCount =
+                    useGameStore.getState().skippedMealCount + 1;
+
+                  void applyDebugStatePatch({
+                    localApply: () => {
+                      addSkippedMealForTest();
+                      onMealStateChanged?.();
+                    },
+                    patch: { skipped_meal_count: nextSkippedMealCount },
+                    successMessage: `${nextSkippedMealCount}끼니`,
+                    successTitle: "거른 끼니를 추가했어요",
+                  });
                 }}
               />
               <DeveloperChipButton
@@ -715,18 +745,24 @@ const DeveloperPanel = ({
               <DeveloperChipButton
                 label={`문제 수 제한 ${quizDailyLimitEnabled ? "끄기" : "켜기"}`}
                 onPress={() => {
-                  toggleQuizDailyLimitEnabled();
-                  showFeedback(
-                    "퀴즈 문제 수 제한을 변경했어요",
-                    quizDailyLimitEnabled ? "OFF" : "ON",
-                  );
+                  const nextEnabled = !quizDailyLimitEnabled;
+
+                  void applyDebugStatePatch({
+                    localApply: toggleQuizDailyLimitEnabled,
+                    patch: { quiz_daily_limit_enabled: nextEnabled },
+                    successMessage: nextEnabled ? "ON" : "OFF",
+                    successTitle: "퀴즈 문제 수 제한을 변경했어요",
+                  });
                 }}
               />
               <DeveloperChipButton
                 label="퀴즈 기록 초기화"
                 onPress={() => {
-                  clearQuizHistory();
-                  showFeedback("퀴즈 기록을 초기화했어요");
+                  void applyDebugStatePatch({
+                    localApply: clearQuizHistory,
+                    patch: { clear_quiz_history: true },
+                    successTitle: "퀴즈 기록을 초기화했어요",
+                  });
                 }}
               />
             </View>
@@ -741,9 +777,17 @@ const DeveloperPanel = ({
               <DeveloperChipButton
                 label="튜토리얼 조회 초기화"
                 onPress={() => {
-                  setHasSeenGameTutorial(false);
-                  setHasSeenMiniGameTutorial(false);
-                  showFeedback("튜토리얼 조회 기록을 초기화했어요");
+                  void applyDebugStatePatch({
+                    localApply: () => {
+                      setHasSeenGameTutorial(false);
+                      setHasSeenMiniGameTutorial(false);
+                    },
+                    patch: {
+                      has_seen_game_tutorial: false,
+                      has_seen_minigame_tutorial: false,
+                    },
+                    successTitle: "튜토리얼 조회 기록을 초기화했어요",
+                  });
                 }}
               />
             </View>
@@ -760,8 +804,11 @@ const DeveloperPanel = ({
                 size="S"
                 label="게임 상태 초기화"
                 onPress={() => {
-                  resetGameState();
-                  showFeedback("게임 상태를 초기화했어요");
+                  void applyDebugStatePatch({
+                    localApply: resetGameState,
+                    patch: { reset_game_state: true },
+                    successTitle: "게임 상태를 초기화했어요",
+                  });
                 }}
                 width={284}
               />

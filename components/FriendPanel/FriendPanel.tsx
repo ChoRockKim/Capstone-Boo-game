@@ -58,14 +58,23 @@ const FriendPanel = ({ setIsFriendOpen }: FriendPanelProps) => {
   const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_COUNT);
   const friendListQueryKey = ["friends", accessToken] as const;
   const friendRequestsQueryKey = ["friends", "requests", accessToken] as const;
-  const { data: serverFriends, refetch: refetchServerFriends } = useQuery({
+  const {
+    data: serverFriends,
+    isFetching: isServerFriendsFetching,
+    isLoading: isServerFriendsLoading,
+    refetch: refetchServerFriends,
+  } = useQuery({
     queryKey: friendListQueryKey,
     queryFn: () => listFriends(accessToken ?? undefined),
     enabled: !!accessToken,
     staleTime: 1000 * 30,
     retry: 1,
   });
-  const { data: friendRequests } = useQuery({
+  const {
+    data: friendRequests,
+    isFetching: isFriendRequestsFetching,
+    isLoading: isFriendRequestsLoading,
+  } = useQuery({
     queryKey: friendRequestsQueryKey,
     queryFn: () => listFriendRequests(accessToken ?? undefined),
     enabled: !!accessToken,
@@ -102,6 +111,14 @@ const FriendPanel = ({ setIsFriendOpen }: FriendPanelProps) => {
     [clampedVisibleCount, displayFriendList],
   );
   const hasMoreFriends = clampedVisibleCount < displayFriendList.length;
+  const isFriendListLoading =
+    !!accessToken &&
+    !serverFriends?.length &&
+    (isServerFriendsLoading || isServerFriendsFetching);
+  const isRequestListLoading =
+    !!accessToken &&
+    !friendRequests &&
+    (isFriendRequestsLoading || isFriendRequestsFetching);
 
   const showFriendPanelAlert = useCallback((title: string, message: string) => {
     setFriendPanelAlert((currentAlert) => ({
@@ -325,7 +342,14 @@ const FriendPanel = ({ setIsFriendOpen }: FriendPanelProps) => {
             </Pressable>
           </View>
         </View>
-        {incomingFriendRequests.length > 0 ? (
+        {isRequestListLoading ? (
+          <View style={styles.requestList}>
+            <Text style={styles.requestHeaderText}>받은 요청</Text>
+            <Text style={styles.loadingText}>
+              친구 요청을 불러오는 중이에요.
+            </Text>
+          </View>
+        ) : incomingFriendRequests.length > 0 ? (
           <View style={styles.requestList}>
             <Text style={styles.requestHeaderText}>받은 요청</Text>
             {incomingFriendRequests.map((request) => {
@@ -372,7 +396,11 @@ const FriendPanel = ({ setIsFriendOpen }: FriendPanelProps) => {
           keyExtractor={(item) => item.id}
           renderItem={renderFriendItem}
           ListEmptyComponent={
-            <Text style={styles.emptyText}>등록된 친구가 아직 없어요.</Text>
+            <Text style={styles.emptyText}>
+              {isFriendListLoading
+                ? "친구 목록을 불러오는 중이에요."
+                : "등록된 친구가 아직 없어요."}
+            </Text>
           }
           scrollEnabled={false}
           style={styles.list}
@@ -579,6 +607,13 @@ const styles = StyleSheet.create({
     fontSize: 18,
     color: colors.SILVER_NORMAL_ACTIVE,
     includeFontPadding: false,
+  },
+  loadingText: {
+    color: colors.SILVER_NORMAL_ACTIVE,
+    fontFamily: fonts.BASIC,
+    fontSize: 16,
+    includeFontPadding: false,
+    lineHeight: 22,
   },
 });
 

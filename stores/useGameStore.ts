@@ -1567,11 +1567,27 @@ export const useGameStore = create<GameStore>()(
         setBooApiAccessToken(accessToken);
 
         set((state) => {
+          const guestGameSnapshot = state.isGuestMode
+            ? createGuestGameSnapshot(state)
+            : state.guestGameSnapshot;
+          const sessionBaseState = state.isGuestMode
+            ? {
+                ...createInitialGameState(),
+                bgmVolume: state.bgmVolume,
+                developerModeEnabled: state.developerModeEnabled,
+                guestGameSnapshot,
+                masterVolume: state.masterVolume,
+                sfxVolume: state.sfxVolume,
+              }
+            : {
+                ...state,
+                guestGameSnapshot,
+              };
           const nextState = {
-            ...state,
+            ...sessionBaseState,
             accessToken,
             achievementStats: {
-              ...state.achievementStats,
+              ...sessionBaseState.achievementStats,
               hasFirstLogin: true,
             },
             autoLoginEnabled,

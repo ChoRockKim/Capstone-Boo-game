@@ -250,6 +250,7 @@ export default function RoomIndex() {
   const [purchaseTarget, setPurchaseTarget] =
     useState<RoomCustomizeOption | null>(null);
   const [purchaseErrorMessage, setPurchaseErrorMessage] = useState("");
+  const [isPurchasePending, setIsPurchasePending] = useState(false);
   const [selectedClosetCostumeKey, setSelectedClosetCostumeKey] =
     useState<CharacterCostumeKey>("default");
   const accessToken = useGameStore((state) => state.accessToken);
@@ -292,7 +293,10 @@ export default function RoomIndex() {
   const userId = useGameStore((state) => state.userId);
   const myRoomQueryKey = ["rooms", "me"] as const;
   const roomShopItemsQueryKey = ["shop", "items"] as const;
-  const guestbookQueryKey = ["rooms", userId, "guestbook"] as const;
+  const guestbookQueryKey = useMemo(
+    () => ["rooms", userId, "guestbook"] as const,
+    [userId],
+  );
   const { data: serverRoom } = useQuery({
     queryKey: ["rooms", "me", accessToken],
     queryFn: () => getMyRoom(accessToken ?? undefined),
@@ -300,7 +304,10 @@ export default function RoomIndex() {
     staleTime: 1000 * 30,
     retry: 1,
   });
-  const { data: serverGuestbookPage } = useQuery({
+  const {
+    data: serverGuestbookPage,
+    isLoading: isServerGuestbookLoading,
+  } = useQuery({
     queryKey: guestbookQueryKey,
     queryFn: () => listRoomGuestbook(userId ?? 0, accessToken ?? undefined),
     enabled: !!accessToken && userId !== null,
@@ -642,6 +649,7 @@ export default function RoomIndex() {
 
       if (!isSelectedCustomizeOptionOwned) {
         setPurchaseErrorMessage("");
+        setIsPurchasePending(false);
         setPurchaseTarget(selectedCustomizeOption);
         return;
       }
@@ -700,6 +708,7 @@ export default function RoomIndex() {
 
     if (!isSelectedCustomizeOptionOwned) {
       setPurchaseErrorMessage("");
+      setIsPurchasePending(false);
       setPurchaseTarget(selectedCustomizeOption);
       return;
     }
@@ -752,6 +761,10 @@ export default function RoomIndex() {
   };
 
   const closePurchaseModal = () => {
+    if (isPurchasePending) {
+      return;
+    }
+
     playSoundEffect("basicClick");
     setPurchaseTarget(null);
     setPurchaseErrorMessage("");
@@ -856,11 +869,19 @@ export default function RoomIndex() {
   };
 
   const confirmPurchase = async () => {
-    if (!purchaseTarget) {
+    if (!purchaseTarget || isPurchasePending) {
       return;
     }
 
     playSoundEffect("basicClick");
+    setIsPurchasePending(true);
+    setPurchaseErrorMessage("");
+    showTopAlert(
+      "구매 중",
+      accessToken
+        ? `${purchaseTarget.label} 구매를 서버에 요청하고 있어요.`
+        : `${purchaseTarget.label} 구매를 처리하고 있어요.`,
+    );
 
     const purchaseCategory = purchaseWallpaper
       ? "wallpaper"
@@ -904,6 +925,7 @@ export default function RoomIndex() {
       });
       setPurchaseErrorMessage(message);
       showTopAlert("상점 정보 오류", message);
+      setIsPurchasePending(false);
       return;
     }
 
@@ -981,8 +1003,15 @@ export default function RoomIndex() {
         void queryClient.invalidateQueries({
           queryKey: ["shop", "items"],
         });
+        showTopAlert(
+          "구매 완료",
+          didEquipPurchasedItem
+            ? `${purchaseTarget.label} 구매와 적용이 완료됐어요.`
+            : `${purchaseTarget.label} 구매가 완료됐어요.`,
+        );
         setPurchaseTarget(null);
         setPurchaseErrorMessage("");
+        setIsPurchasePending(false);
         return;
       } catch (error) {
         console.warn("[RoomShop] purchase request failed", {
@@ -990,9 +1019,13 @@ export default function RoomIndex() {
           serverItem: getRoomShopItemLogPayload(serverPurchaseItem),
           target: purchaseTarget,
         });
-        setPurchaseErrorMessage(
-          getServerApiErrorMessage(error, "구매에 실패했어요."),
+        const message = getServerApiErrorMessage(
+          error,
+          "구매에 실패했어요.",
         );
+        setPurchaseErrorMessage(message);
+        showTopAlert("구매 실패", message);
+        setIsPurchasePending(false);
         return;
       }
     }
@@ -1004,17 +1037,25 @@ export default function RoomIndex() {
         : { ok: false as const, reason: "not_found" as const };
 
     if (result.ok) {
+      showTopAlert("구매 완료", `${purchaseTarget.label} 구매가 완료됐어요.`);
       setPurchaseTarget(null);
       setPurchaseErrorMessage("");
+      setIsPurchasePending(false);
       return;
     }
 
     if (result.reason === "insufficient_coin") {
-      setPurchaseErrorMessage("코인이 부족해요.");
+      const message = "코인이 부족해요.";
+      setPurchaseErrorMessage(message);
+      showTopAlert("구매 실패", message);
+      setIsPurchasePending(false);
       return;
     }
 
-    setPurchaseErrorMessage("구매할 수 없는 아이템이에요.");
+    const message = "구매할 수 없는 아이템이에요.";
+    setPurchaseErrorMessage(message);
+    showTopAlert("구매 실패", message);
+    setIsPurchasePending(false);
   };
 
   const toggleOwnedCustomizeOptionsOnly = () => {
@@ -1062,6 +1103,8 @@ export default function RoomIndex() {
     <View style={styles.root}>
       <StatusBar hidden />
       <TopAlert
+        autoHideDuration={isPurchasePending ? 0 : 2500}
+        closable={!isPurchasePending}
         message={topAlert.message}
         onClose={hideTopAlert}
         title={topAlert.title}
@@ -1194,6 +1237,12 @@ export default function RoomIndex() {
         {isGuestbookListOpen ? (
           <GuestbookListModal
             entries={guestbookEntries}
+            isLoading={
+              !!accessToken &&
+              userId !== null &&
+              isServerGuestbookLoading &&
+              !serverGuestbookPage
+            }
             onActionError={showTopAlert}
             onDeleteEntry={handleGuestbookDelete}
             onClose={() => setIsGuestbookListOpen(false)}
@@ -1294,23 +1343,40 @@ export default function RoomIndex() {
               ) : null}
               <View style={styles.purchaseActionRow}>
                 <Pressable
+                  disabled={isPurchasePending}
                   onPress={confirmPurchase}
                   style={({ pressed }) => [
                     styles.purchaseActionButton,
                     styles.purchaseConfirmButton,
-                    pressed && styles.purchaseActionButtonPressed,
+                    isPurchasePending && styles.purchaseActionButtonDisabled,
+                    pressed &&
+                      !isPurchasePending &&
+                      styles.purchaseActionButtonPressed,
                   ]}
                 >
-                  <Text style={styles.purchaseConfirmText}>예</Text>
+                  <Text style={styles.purchaseConfirmText}>
+                    {isPurchasePending ? "구매 중" : "예"}
+                  </Text>
                 </Pressable>
                 <Pressable
+                  disabled={isPurchasePending}
                   onPress={closePurchaseModal}
                   style={({ pressed }) => [
                     styles.purchaseActionButton,
-                    pressed && styles.purchaseActionButtonPressed,
+                    isPurchasePending && styles.purchaseActionButtonDisabled,
+                    pressed &&
+                      !isPurchasePending &&
+                      styles.purchaseActionButtonPressed,
                   ]}
                 >
-                  <Text style={styles.purchaseCancelText}>아니오</Text>
+                  <Text
+                    style={[
+                      styles.purchaseCancelText,
+                      isPurchasePending && styles.purchaseCancelTextDisabled,
+                    ]}
+                  >
+                    아니오
+                  </Text>
                 </Pressable>
               </View>
             </View>
@@ -1707,6 +1773,10 @@ const styles = StyleSheet.create({
   purchaseActionButtonPressed: {
     backgroundColor: colors.GOLD_LIGHT_ACTIVE,
   },
+  purchaseActionButtonDisabled: {
+    backgroundColor: colors.SILVER_LIGHT_HOVER,
+    borderColor: colors.GRAY_NORMAL_ACTIVE,
+  },
   purchaseConfirmButton: {
     backgroundColor: colors.GREEN_NORMAL,
   },
@@ -1723,5 +1793,8 @@ const styles = StyleSheet.create({
     fontSize: 20,
     includeFontPadding: false,
     lineHeight: 28,
+  },
+  purchaseCancelTextDisabled: {
+    color: colors.SILVER_NORMAL,
   },
 });

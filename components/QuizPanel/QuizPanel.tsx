@@ -9,7 +9,6 @@ import { colors } from "@/constants/colors";
 import { fonts } from "@/constants/fonts";
 import { useGameStore } from "@/stores/useGameStore";
 import {
-  getNextQuiz,
   getQuizPlayStatus,
   getServerApiErrorMessage,
   listAvailableQuizzes,
@@ -152,18 +151,6 @@ function QuizPanel({ onQuizResultAlert, setIsQuizOpen }: QuizPanelProps) {
     retry: 1,
   });
   const {
-    data: serverNextQuiz,
-    isLoading: isServerNextQuizLoading,
-    refetch: refetchServerNextQuiz,
-  } = useQuery({
-    queryKey: ["quizzes", "next", accessToken, serverQuizStatus?.solved_today],
-    queryFn: () => getNextQuiz(accessToken ?? undefined),
-    enabled: isServerQuizEnabled && serverQuizStatus?.can_play_now === true,
-    staleTime: 0,
-    gcTime: 1000 * 60 * 5,
-    retry: 1,
-  });
-  const {
     data: serverAvailableQuizzes,
     isLoading: isServerAvailableQuizzesLoading,
     refetch: refetchServerAvailableQuizzes,
@@ -175,20 +162,14 @@ function QuizPanel({ onQuizResultAlert, setIsQuizOpen }: QuizPanelProps) {
       serverQuizStatus?.solved_today,
     ],
     queryFn: () => listAvailableQuizzes(accessToken ?? undefined),
-    enabled:
-      isServerQuizEnabled &&
-      serverQuizStatus?.can_play_now === true &&
-      !serverNextQuiz,
+    enabled: isServerQuizEnabled && serverQuizStatus?.can_play_now === true,
     staleTime: 0,
     gcTime: 1000 * 60 * 5,
     retry: 1,
   });
   const serverQuestion = useMemo(
-    () =>
-      mapServerQuizQuestion(
-        serverNextQuiz ?? serverAvailableQuizzes?.[0] ?? null,
-      ),
-    [serverAvailableQuizzes, serverNextQuiz],
+    () => mapServerQuizQuestion(serverAvailableQuizzes?.[0] ?? null),
+    [serverAvailableQuizzes],
   );
 
   const quizCountToday = useMemo(
@@ -214,7 +195,8 @@ function QuizPanel({ onQuizResultAlert, setIsQuizOpen }: QuizPanelProps) {
   const nextAvailableAt = useMemo(
     () =>
       isServerQuizEnabled
-        ? serverQuizStatus?.next_available_at
+        ? serverQuizStatus?.can_play_now === false &&
+          serverQuizStatus?.next_available_at
           ? new Date(serverQuizStatus.next_available_at)
           : null
         : quizDailyLimitEnabled
@@ -256,10 +238,33 @@ function QuizPanel({ onQuizResultAlert, setIsQuizOpen }: QuizPanelProps) {
   useEffect(() => {
     const timer = setInterval(() => {
       setNow(new Date());
-    }, 60000);
+    }, nextAvailableAt ? 1000 : 60000);
 
     return () => clearInterval(timer);
-  }, []);
+  }, [nextAvailableAt]);
+
+  useEffect(() => {
+    if (!isServerQuizEnabled || !nextAvailableAt || activeQuestion) {
+      return;
+    }
+
+    const remainingMs = nextAvailableAt.getTime() - Date.now();
+    if (remainingMs <= 0) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      setNow(new Date());
+      void refetchServerQuizStatus();
+    }, Math.max(remainingMs, 0) + 300);
+
+    return () => clearTimeout(timer);
+  }, [
+    activeQuestion,
+    isServerQuizEnabled,
+    nextAvailableAt,
+    refetchServerQuizStatus,
+  ]);
 
   const closeQuizPanel = useCallback(() => {
     setCurrentQuestion(null);
@@ -374,7 +379,6 @@ function QuizPanel({ onQuizResultAlert, setIsQuizOpen }: QuizPanelProps) {
 
           await Promise.all([
             refetchServerQuizStatus(),
-            refetchServerNextQuiz(),
             refetchServerAvailableQuizzes(),
           ]);
         } catch (error) {
@@ -500,7 +504,6 @@ function QuizPanel({ onQuizResultAlert, setIsQuizOpen }: QuizPanelProps) {
         }
         await Promise.all([
           refetchServerQuizStatus(),
-          refetchServerNextQuiz(),
           refetchServerAvailableQuizzes(),
         ]);
       } catch (error) {
@@ -562,7 +565,7 @@ function QuizPanel({ onQuizResultAlert, setIsQuizOpen }: QuizPanelProps) {
       return activeQuestion.question;
     }
 
-    if (isServerNextQuizLoading || isServerAvailableQuizzesLoading) {
+    if (isServerAvailableQuizzesLoading) {
       return "퀴즈를\n불러오고 있어요.";
     }
 
@@ -578,15 +581,17 @@ function QuizPanel({ onQuizResultAlert, setIsQuizOpen }: QuizPanelProps) {
       return `다음 퀴즈는\n${formatQuizCooldownRemaining(nextAvailableAt, now)} 뒤에 열려요.`;
     }
 
-    return "지금 풀 수 있는\n퀴즈가 없어요.";
+    return isServerQuizEnabled
+      ? "새로 풀 수 있는\n퀴즈가 없어요."
+      : "지금 풀 수 있는\n퀴즈가 없어요.";
   }, [
     canTakeMoreQuizzesToday,
     activeQuestion,
     nextAvailableAt,
     now,
-    isServerNextQuizLoading,
     isServerAvailableQuizzesLoading,
     isServerQuizStatusLoading,
+    isServerQuizEnabled,
     resultState,
   ]);
   const quizDailyLimit =
@@ -665,6 +670,8 @@ function QuizPanel({ onQuizResultAlert, setIsQuizOpen }: QuizPanelProps) {
           <Text style={styles.helperText}>
             {isServerQuizStatusLoading
               ? "서버 상태를 확인하는 중이에요."
+              : isServerQuizEnabled && canTakeMoreQuizzesToday
+              ? "아직 서버에 새 퀴즈가 없어요."
               : canTakeMoreQuizzesToday
               ? "조금 뒤에 다시 확인해보세요."
               : "내일 다시 퀴즈에 도전할 수 있어요."}

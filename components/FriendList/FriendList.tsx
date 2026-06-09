@@ -45,7 +45,12 @@ const FriendList = ({
   const [deleteModalState, setDeleteModalState] = useState<DeleteModalState>(
     null,
   );
-  const { data: serverFriends, refetch: refetchServerFriends } = useQuery({
+  const {
+    data: serverFriends,
+    isFetching: isServerFriendsFetching,
+    isLoading: isServerFriendsLoading,
+    refetch: refetchServerFriends,
+  } = useQuery({
     queryKey: ["friends", accessToken],
     queryFn: () => listFriends(accessToken ?? undefined),
     enabled: !!accessToken,
@@ -71,6 +76,10 @@ const FriendList = ({
     [clampedVisibleCount, displayFriendList],
   );
   const hasMoreFriends = clampedVisibleCount < displayFriendList.length;
+  const isFriendListLoading =
+    !!accessToken &&
+    !serverFriends?.length &&
+    (isServerFriendsLoading || isServerFriendsFetching);
 
   const handleClosePress = () => {
     playSoundEffect("basicClick");
@@ -200,7 +209,11 @@ const FriendList = ({
           keyExtractor={(item) => item.id}
           renderItem={renderFriendItem}
           ListEmptyComponent={
-            <Text style={styles.emptyText}>등록된 친구가 아직 없어요.</Text>
+            <Text style={styles.emptyText}>
+              {isFriendListLoading
+                ? "친구 목록을 불러오는 중이에요."
+                : "등록된 친구가 아직 없어요."}
+            </Text>
           }
           scrollEnabled={false}
           style={styles.list}

@@ -24,6 +24,7 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 interface EvolutionOverlayProps {
   fromGrade: CharacterGrade;
@@ -94,6 +95,9 @@ const getPlayDayCount = (createdAt?: string | null) => {
   return Math.max(elapsedDays + 1, 1);
 };
 
+const formatGraduationCertificateDate = (date: Date) =>
+  `${date.getFullYear()}년 ${date.getMonth() + 1}월 ${date.getDate()}일`;
+
 const getGraduationStats = (
   playDayCount: number,
   achievementStats?: GraduationStatsSnapshot,
@@ -147,18 +151,21 @@ const getServerMiniGameBestScores = (
         normalizedGameType === "bookcatch" ||
         normalizedGameType === "catchmajor"
       ) {
-        scores.catchTheMajor = score.best_score;
+        scores.catchTheMajor = Math.max(
+          scores.catchTheMajor ?? 0,
+          score.best_score,
+        );
       }
 
       if (normalizedGameType === "catchboo") {
-        scores.catchBoo = score.best_score;
+        scores.catchBoo = Math.max(scores.catchBoo ?? 0, score.best_score);
       }
 
       if (
         normalizedGameType === "freethrow" ||
         normalizedGameType === "basketball"
       ) {
-        scores.freeThrow = score.best_score;
+        scores.freeThrow = Math.max(scores.freeThrow ?? 0, score.best_score);
       }
 
       return scores;
@@ -182,26 +189,14 @@ const mergeGraduationStats = (
   const serverBestScores = getServerMiniGameBestScores(serverSummary);
 
   return {
-    feedCount: Math.max(localStats?.feedCount ?? 0, serverSummary.feed_count),
+    feedCount: serverSummary.feed_count,
     miniGameBestScores: {
-      catchBoo: Math.max(
-        localStats?.miniGameBestScores?.catchBoo ?? 0,
-        serverBestScores?.catchBoo ?? 0,
-      ),
-      catchTheMajor: Math.max(
-        localStats?.miniGameBestScores?.catchTheMajor ?? 0,
-        serverBestScores?.catchTheMajor ?? 0,
-      ),
-      freeThrow: Math.max(
-        localStats?.miniGameBestScores?.freeThrow ?? 0,
-        serverBestScores?.freeThrow ?? 0,
-      ),
+      catchBoo: serverBestScores?.catchBoo ?? 0,
+      catchTheMajor: serverBestScores?.catchTheMajor ?? 0,
+      freeThrow: serverBestScores?.freeThrow ?? 0,
     },
     quizAttemptCount: serverSummary.quiz_attempt_count,
-    quizCorrectCount: Math.max(
-      localStats?.quizCorrectCount ?? 0,
-      serverSummary.quiz_correct_count,
-    ),
+    quizCorrectCount: serverSummary.quiz_correct_count,
   };
 };
 
@@ -216,6 +211,7 @@ export function GraduationOverlay({
   visible,
 }: GraduationOverlayProps) {
   const { width } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const booSlideX = useRef(new Animated.Value(54)).current;
   const introAdvanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
@@ -293,6 +289,8 @@ export function GraduationOverlay({
   );
   const canGoBack = stepIndex > 0;
   const canGoNext = stepIndex < GRADUATION_STEPS.length - 1;
+  const continueTextTop = Math.max(insets.top + 18, 76);
+  const graduationCertificateDate = formatGraduationCertificateDate(new Date());
 
   const goBack = () => {
     if (!canGoBack) {
@@ -378,7 +376,7 @@ export function GraduationOverlay({
                 훌륭하게 성장하였기에{"\n"}이 졸업장을 수여합니다
               </Text>
               <Text style={graduationStyles.certificateDate}>
-                2026년 5월 13일
+                {graduationCertificateDate}
               </Text>
             </View>
           ) : null}
@@ -444,7 +442,10 @@ export function GraduationOverlay({
           ) : null}
 
           {canGoNext ? (
-            <Text pointerEvents="none" style={graduationStyles.continueText}>
+            <Text
+              pointerEvents="none"
+              style={[graduationStyles.continueText, { top: continueTextTop }]}
+            >
               화면을 터치하여 계속
             </Text>
           ) : null}

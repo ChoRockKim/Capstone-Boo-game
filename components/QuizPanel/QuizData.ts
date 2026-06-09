@@ -606,15 +606,25 @@ export const formatQuizCooldownRemaining = (
   now = new Date(),
 ) => {
   const remainingMs = Math.max(targetDate.getTime() - now.getTime(), 0);
-  const totalMinutes = Math.ceil(remainingMs / (1000 * 60));
+  const totalSeconds = Math.ceil(remainingMs / 1000);
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
   const hours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
 
-  if (hours <= 0 && minutes <= 0) {
-    return "곧";
+  if (totalSeconds <= 0) {
+    return "0초";
+  }
+
+  if (totalSeconds < 60) {
+    return `${totalSeconds}초`;
   }
 
   if (hours <= 0) {
+    if (seconds > 0) {
+      return `${minutes}분 ${seconds}초`;
+    }
+
     return `${minutes}분`;
   }
 

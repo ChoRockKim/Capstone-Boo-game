@@ -98,6 +98,7 @@ import {
   confirmGraduation,
   confirmMyCharacterEvolution,
   type GraduationSummary,
+  getGraduationSummary,
   getQuizPlayStatus,
   getSchoolFoodFeedStatus,
 } from "@/utils/serverApi";
@@ -477,16 +478,16 @@ export default function Index() {
   );
   const isServerQuizDailyLimitReached =
     isServerQuizEnabled && (serverQuizStatus?.remaining_today ?? 1) <= 0;
-  const isServerQuizCooldownExpired =
+  const isServerQuizCooldownLocked =
     isServerQuizEnabled &&
     !isServerQuizDailyLimitReached &&
+    serverQuizStatus?.can_play_now === false &&
     !!serverQuizNextAvailableAt &&
-    serverQuizNextAvailableAt.getTime() <= mealNow.getTime();
+    serverQuizNextAvailableAt.getTime() > mealNow.getTime();
   const isServerQuizUnavailable =
     isServerQuizEnabled &&
     (isServerQuizStatusLoading ||
-      (serverQuizStatus?.can_play_now !== true &&
-        !isServerQuizCooldownExpired));
+      serverQuizStatus?.can_play_now === false);
   const isLocalQuizDailyLimitReached =
     quizDailyLimitEnabled && localQuizCountToday >= QUIZ_DAILY_LIMIT;
   const isLocalQuizCooldownLocked =
@@ -503,9 +504,9 @@ export default function Index() {
   const nextQuizUnlockAt = isServerQuizEnabled
     ? isServerQuizDailyLimitReached
       ? getNextQuizDailyResetAt(mealNow)
-      : isServerQuizCooldownExpired
-        ? null
-        : serverQuizNextAvailableAt
+      : isServerQuizCooldownLocked
+        ? serverQuizNextAvailableAt
+        : null
     : isQuizDailyLimitReached
       ? getNextQuizDailyResetAt(mealNow)
       : localNextQuizAvailableAt;
@@ -585,20 +586,30 @@ export default function Index() {
       return;
     }
 
-    if (!isServerQuizCooldownExpired) {
+    if (isServerQuizDailyLimitReached) {
       return;
     }
 
     const refetchKey = serverQuizNextAvailableAt.toISOString();
-
     if (quizCooldownRefetchKeyRef.current === refetchKey) {
       return;
     }
 
+    const remainingMs = serverQuizNextAvailableAt.getTime() - Date.now();
+    if (remainingMs > 0) {
+      const timer = setTimeout(() => {
+        quizCooldownRefetchKeyRef.current = refetchKey;
+        void refetchServerQuizStatus();
+      }, remainingMs + 300);
+
+      return () => clearTimeout(timer);
+    }
+
     quizCooldownRefetchKeyRef.current = refetchKey;
     void refetchServerQuizStatus();
+    return undefined;
   }, [
-    isServerQuizCooldownExpired,
+    isServerQuizDailyLimitReached,
     isServerQuizEnabled,
     refetchServerQuizStatus,
     serverQuizNextAvailableAt,
@@ -1101,13 +1112,22 @@ export default function Index() {
       setGraduationSummary(null);
       setIsGraduationOpen(true);
 
+      const currentAccessToken = useGameStore.getState().accessToken;
+
       if (options?.preview) {
+        if (currentAccessToken) {
+          void getGraduationSummary(currentAccessToken)
+            .then((summary) => {
+              setGraduationSummary(summary);
+            })
+            .catch((error) => {
+              console.warn("서버 졸업 요약 조회 실패", error);
+            });
+        }
         return;
       }
 
       clearPendingEvolution();
-
-      const currentAccessToken = useGameStore.getState().accessToken;
 
       if (currentAccessToken) {
         void confirmGraduation(currentAccessToken)

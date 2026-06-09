@@ -69,7 +69,7 @@ npm run lint
 - 로그인 상태 미니게임 시작/보상은 서버 `/economy/minigame/start`, `/economy/minigame/reward`를 우선 사용합니다.
 - 미니게임 랭킹 목록은 서버 `/minigames/rankings`, `/minigames/rankings/friends`를 사용합니다.
 - 게스트 모드는 `guestGameSnapshot`에 로컬 진행도를 보관하며, 친구/방명록/친구 랭킹 기능은 사용하지 않습니다.
-- 4학년 XP를 모두 채우면 졸업 화면을 표시하고, 졸업 리포트 통계는 현재 로컬 누적값을 사용합니다.
+- 4학년 XP를 모두 채우면 졸업 화면을 표시하고, 로그인 상태의 졸업 리포트 통계는 서버 `/graduation/confirm` 또는 `/graduation/summary` 응답을 우선 사용합니다.
 - 전공책 받기 점수 아이템 획득 시 `assets/musics/sfx/point-plus.m4a`를 재생합니다.
 - BGM 기본 볼륨은 이전 대비 약 70% 수준으로 낮춰져 있고, 졸업 화면은 `assets/musics/bgm/graduation.mp3`를 별도 BGM으로 사용합니다.
 

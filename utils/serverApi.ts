@@ -7,8 +7,11 @@
 import type { CharacterCostumeKey } from "@/constants/character";
 import { AxiosError, AxiosRequestConfig, create, isAxiosError } from "axios";
 
-export const BOO_API_BASE_URL =
+const DEFAULT_BOO_API_BASE_URL =
   "https://capstonedesign-production.up.railway.app";
+
+export const BOO_API_BASE_URL =
+  process.env.EXPO_PUBLIC_BOO_API_BASE_URL ?? DEFAULT_BOO_API_BASE_URL;
 
 const createBooApiClient = () =>
   create({
@@ -249,13 +252,17 @@ export type BooCharacter = {
 };
 
 export type CharacterMeOut = {
+  applied_penalty_count?: number;
   character_id: number;
   character_name: string;
   equipped_skin_key?: CharacterCostumeKey | null;
   grade?: number;
+  hungry_state?: boolean;
+  last_checked_meal_slot?: string | null;
   name?: string;
   nickname?: string;
   pending_evolution?: boolean;
+  skipped_meal_count?: number;
   stage: number;
   state: string;
   xp_point: number;
@@ -497,6 +504,9 @@ export type UserPreferenceOut = {
   has_seen_game_tutorial?: boolean;
   has_seen_minigame_tutorial?: boolean;
   master_volume?: number | null;
+  meal_day_mode?: string | null;
+  meal_restriction_enabled?: boolean | null;
+  quiz_daily_limit_enabled?: boolean | null;
   sfx_volume?: number | null;
   updated_at?: string | null;
 };
@@ -550,9 +560,21 @@ export type GraduationSummary = {
 };
 
 export type DebugMePatch = {
+  character_name?: string | null;
   character_state?: string | null;
+  clear_meal_history?: boolean | null;
+  clear_quiz_history?: boolean | null;
   coin?: number | null;
+  has_seen_game_tutorial?: boolean | null;
+  has_seen_minigame_tutorial?: boolean | null;
+  meal_day_mode?: string | null;
+  meal_restriction_enabled?: boolean | null;
+  name?: string | null;
+  quiz_daily_limit_enabled?: boolean | null;
+  reset_game_state?: boolean | null;
+  skipped_meal_count?: number | null;
   stage?: number | null;
+  student_id?: string | null;
   xp_point?: number | null;
 };
 

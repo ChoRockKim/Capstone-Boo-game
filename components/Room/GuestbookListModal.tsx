@@ -23,6 +23,7 @@ import {
 
 interface GuestbookListModalProps {
   entries?: RoomGuestbookListEntry[];
+  isLoading?: boolean;
   onActionError?: (title: string, message: string) => void;
   onDeleteEntry?: (entry: RoomGuestbookListEntry) => Promise<void> | void;
   onClose: () => void;
@@ -32,6 +33,7 @@ const INITIAL_VISIBLE_ENTRY_COUNT = 4;
 
 const GuestbookListModal = ({
   entries = [],
+  isLoading = false,
   onActionError,
   onDeleteEntry,
   onClose,
@@ -140,6 +142,13 @@ const GuestbookListModal = ({
           showsVerticalScrollIndicator={false}
           style={styles.entryList}
         >
+          {!visibleEntries.length ? (
+            <Text style={styles.emptyText}>
+              {isLoading
+                ? "방명록을 불러오는 중이에요."
+                : "남겨진 방명록이 아직 없어요."}
+            </Text>
+          ) : null}
           {visibleEntries.map((entry) => (
             <Pressable
               key={entry.id}
@@ -296,6 +305,14 @@ const styles = StyleSheet.create({
   },
   entryListContent: {
     gap: 10,
+  },
+  emptyText: {
+    color: colors.SILVER_NORMAL_ACTIVE,
+    fontFamily: fonts.BASIC,
+    fontSize: 18,
+    includeFontPadding: false,
+    lineHeight: 24,
+    textAlign: "center",
   },
   entryRow: {
     width: "100%",

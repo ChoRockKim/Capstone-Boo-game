@@ -597,7 +597,7 @@ const styles = StyleSheet.create({
     opacity: 0.55,
   },
   placeInfoDescriptionScroll: {
-    maxHeight: 190,
+    maxHeight: 230,
   },
   placeInfoDescriptionContent: {
     paddingRight: 4,

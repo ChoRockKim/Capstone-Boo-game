@@ -142,6 +142,17 @@ export const syncServerUserStats = async (accessToken?: string) => {
       ...(typeof userPreferences?.master_volume === "number"
         ? { masterVolume: userPreferences.master_volume }
         : {}),
+      ...(userPreferences?.meal_day_mode === "auto" ||
+      userPreferences?.meal_day_mode === "weekday" ||
+      userPreferences?.meal_day_mode === "weekend"
+        ? { mealDayMode: userPreferences.meal_day_mode }
+        : {}),
+      ...(typeof userPreferences?.meal_restriction_enabled === "boolean"
+        ? { mealRestrictionEnabled: userPreferences.meal_restriction_enabled }
+        : {}),
+      ...(typeof userPreferences?.quiz_daily_limit_enabled === "boolean"
+        ? { quizDailyLimitEnabled: userPreferences.quiz_daily_limit_enabled }
+        : {}),
       ...(typeof userPreferences?.sfx_volume === "number"
         ? { sfxVolume: userPreferences.sfx_volume }
         : {}),
