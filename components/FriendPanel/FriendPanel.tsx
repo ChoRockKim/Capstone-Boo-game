@@ -72,8 +72,6 @@ const FriendPanel = ({ setIsFriendOpen }: FriendPanelProps) => {
   });
   const {
     data: friendRequests,
-    isFetching: isFriendRequestsFetching,
-    isLoading: isFriendRequestsLoading,
   } = useQuery({
     queryKey: friendRequestsQueryKey,
     queryFn: () => listFriendRequests(accessToken ?? undefined),
@@ -115,11 +113,6 @@ const FriendPanel = ({ setIsFriendOpen }: FriendPanelProps) => {
     !!accessToken &&
     !serverFriends?.length &&
     (isServerFriendsLoading || isServerFriendsFetching);
-  const isRequestListLoading =
-    !!accessToken &&
-    !friendRequests &&
-    (isFriendRequestsLoading || isFriendRequestsFetching);
-
   const showFriendPanelAlert = useCallback((title: string, message: string) => {
     setFriendPanelAlert((currentAlert) => ({
       id: currentAlert.id + 1,
@@ -342,14 +335,7 @@ const FriendPanel = ({ setIsFriendOpen }: FriendPanelProps) => {
             </Pressable>
           </View>
         </View>
-        {isRequestListLoading ? (
-          <View style={styles.requestList}>
-            <Text style={styles.requestHeaderText}>받은 요청</Text>
-            <Text style={styles.loadingText}>
-              친구 요청을 불러오는 중이에요.
-            </Text>
-          </View>
-        ) : incomingFriendRequests.length > 0 ? (
+        {incomingFriendRequests.length > 0 ? (
           <View style={styles.requestList}>
             <Text style={styles.requestHeaderText}>받은 요청</Text>
             {incomingFriendRequests.map((request) => {
@@ -607,13 +593,6 @@ const styles = StyleSheet.create({
     fontSize: 18,
     color: colors.SILVER_NORMAL_ACTIVE,
     includeFontPadding: false,
-  },
-  loadingText: {
-    color: colors.SILVER_NORMAL_ACTIVE,
-    fontFamily: fonts.BASIC,
-    fontSize: 16,
-    includeFontPadding: false,
-    lineHeight: 22,
   },
 });
 

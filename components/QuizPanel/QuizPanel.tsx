@@ -666,11 +666,12 @@ function QuizPanel({ onQuizResultAlert, setIsQuizOpen }: QuizPanelProps) {
             ))}
           </View>
         ) : null}
-        {!resultState && !activeQuestion ? (
+        {!resultState &&
+        !activeQuestion &&
+        !isServerQuizStatusLoading &&
+        !isServerAvailableQuizzesLoading ? (
           <Text style={styles.helperText}>
-            {isServerQuizStatusLoading
-              ? "서버 상태를 확인하는 중이에요."
-              : isServerQuizEnabled && canTakeMoreQuizzesToday
+            {isServerQuizEnabled && canTakeMoreQuizzesToday
               ? "아직 서버에 새 퀴즈가 없어요."
               : canTakeMoreQuizzesToday
               ? "조금 뒤에 다시 확인해보세요."

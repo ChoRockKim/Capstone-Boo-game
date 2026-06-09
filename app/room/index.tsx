@@ -825,6 +825,12 @@ export default function RoomIndex() {
     }
 
     playSoundEffect("basicClick");
+
+    if (selectedClosetCostumeKey === characterCostumeKey) {
+      setIsClosetOpen(false);
+      return;
+    }
+
     const previousCostumeKey = characterCostumeKey;
     setCharacterCostumeKey(selectedClosetCostumeKey);
 

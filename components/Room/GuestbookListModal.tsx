@@ -27,6 +27,7 @@ interface GuestbookListModalProps {
   onActionError?: (title: string, message: string) => void;
   onDeleteEntry?: (entry: RoomGuestbookListEntry) => Promise<void> | void;
   onClose: () => void;
+  onWritePress?: () => void;
 }
 
 const INITIAL_VISIBLE_ENTRY_COUNT = 4;
@@ -37,6 +38,7 @@ const GuestbookListModal = ({
   onActionError,
   onDeleteEntry,
   onClose,
+  onWritePress,
 }: GuestbookListModalProps) => {
   const [deletedEntryIds, setDeletedEntryIds] = useState<string[]>([]);
   const [isExpanded, setIsExpanded] = useState(false);
@@ -121,15 +123,28 @@ const GuestbookListModal = ({
     setIsExpanded((currentValue) => !currentValue);
   };
 
+  const handleWritePress = () => {
+    playSoundEffect("basicClick");
+    onWritePress?.();
+  };
+
   return (
     <View pointerEvents="auto" style={styles.overlay}>
       <View style={styles.modalCard}>
         <View style={styles.headerContainer}>
           <Text style={styles.headerText}>방명록</Text>
           <View style={styles.headerActions}>
-            <View pointerEvents="none" style={styles.writeIconBox}>
+            <Pressable
+              disabled={!onWritePress}
+              onPress={handleWritePress}
+              style={({ pressed }) => [
+                styles.writeIconBox,
+                !onWritePress && styles.writeIconBoxDisabled,
+                pressed && styles.writeIconBoxPressed,
+              ]}
+            >
               <EditSquareIcon width={24} height={24} />
-            </View>
+            </Pressable>
             <Pressable onPress={handleClose} style={styles.headerButton}>
               <CrossIcon width={28} height={28} fill={colors.BLACK_NORMAL} />
             </Pressable>
@@ -211,18 +226,20 @@ const GuestbookListModal = ({
             </Text>
             <Text style={styles.detailAuthorText}>{selectedEntry.authorName}</Text>
             <View style={styles.detailActionRow}>
-              <Pressable
-                disabled={isSubmittingEntryAction}
-                onPress={handleDeletePress}
-                style={({ pressed }) => [
-                  styles.detailActionButton,
-                  styles.deleteButton,
-                  isSubmittingEntryAction && styles.detailActionButtonDisabled,
-                  pressed && styles.detailActionButtonPressed,
-                ]}
-              >
-                <Text style={styles.deleteButtonText}>삭제</Text>
-              </Pressable>
+              {onDeleteEntry ? (
+                <Pressable
+                  disabled={isSubmittingEntryAction}
+                  onPress={handleDeletePress}
+                  style={({ pressed }) => [
+                    styles.detailActionButton,
+                    styles.deleteButton,
+                    isSubmittingEntryAction && styles.detailActionButtonDisabled,
+                    pressed && styles.detailActionButtonPressed,
+                  ]}
+                >
+                  <Text style={styles.deleteButtonText}>삭제</Text>
+                </Pressable>
+              ) : null}
               <Pressable
                 onPress={handleVisitPress}
                 style={({ pressed }) => [
@@ -298,6 +315,14 @@ const styles = StyleSheet.create({
   writeIconBox: {
     alignItems: "center",
     justifyContent: "center",
+    height: 32,
+    width: 32,
+  },
+  writeIconBoxDisabled: {
+    opacity: 0.45,
+  },
+  writeIconBoxPressed: {
+    opacity: 0.65,
   },
   entryList: {
     flexGrow: 0,

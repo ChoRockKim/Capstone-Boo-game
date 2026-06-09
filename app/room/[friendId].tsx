@@ -10,7 +10,9 @@ import {
   getFriendRoomSnapshot,
 } from "@/components/FriendList/FriendListDummyData";
 import ProgressBar from "@/components/ProgressBar/ProgressBar";
+import GuestbookListModal from "@/components/Room/GuestbookListModal";
 import GuestbookModal from "@/components/Room/GuestbookModal";
+import { RoomGuestbookListEntry } from "@/components/Room/RoomGuestbookDummyData";
 import {
   ROOM_CANVAS_ASPECT_RATIO,
 } from "@/components/Room/RoomData";
@@ -30,8 +32,10 @@ import {
   createRoomGuestbook,
   getServerApiErrorMessage,
   getUserRoom,
+  listRoomGuestbook,
   type GuestbookPage,
 } from "@/utils/serverApi";
+import { mapGuestbookOutToListEntry } from "@/utils/serverGuestbookAdapter";
 import { mapServerRoomViewToLocalRoomState } from "@/utils/serverRoomAdapter";
 import { playSoundEffect } from "@/utils/soundEffects";
 import { getXpProgressInfo } from "@/utils/xpProgress";
@@ -92,11 +96,15 @@ const FriendRoomIndex = () => {
   const accessToken = useGameStore((state) => state.accessToken);
   const addGuestbookEntry = useGameStore((state) => state.addGuestbookEntry);
   const friendList = useGameStore((state) => state.friendList);
+  const guestbookEntriesByFriendId = useGameStore(
+    (state) => state.guestbookEntries,
+  );
   const isGuestMode = useGameStore((state) => state.isGuestMode);
   const currentUserId = useGameStore((state) => state.userId);
   const currentUserNickname = useGameStore((state) => state.userNickname);
   const queryClient = useQueryClient();
-  const [isGuestbookOpen, setIsGuestbookOpen] = useState(false);
+  const [isGuestbookListOpen, setIsGuestbookListOpen] = useState(false);
+  const [isGuestbookWriteOpen, setIsGuestbookWriteOpen] = useState(false);
 
   const friend = useMemo(
     () =>
@@ -114,10 +122,23 @@ const FriendRoomIndex = () => {
     friend?.serverUserId ??
     (Number.isFinite(parsedFriendUserId) ? parsedFriendUserId : null) ??
     (Number.isFinite(serverUserIdFromFriendId) ? serverUserIdFromFriendId : null);
-  const guestbookQueryKey = ["rooms", serverUserId, "guestbook"] as const;
+  const guestbookQueryKey = useMemo(
+    () => ["rooms", serverUserId, "guestbook"] as const,
+    [serverUserId],
+  );
   const { data: serverRoom } = useQuery({
     queryKey: ["rooms", serverUserId, accessToken],
     queryFn: () => getUserRoom(serverUserId ?? 0, accessToken ?? undefined),
+    enabled: !!accessToken && serverUserId !== null,
+    staleTime: 1000 * 30,
+    retry: 1,
+  });
+  const {
+    data: serverGuestbookPage,
+    isLoading: isServerGuestbookLoading,
+  } = useQuery({
+    queryKey: guestbookQueryKey,
+    queryFn: () => listRoomGuestbook(serverUserId ?? 0, accessToken ?? undefined),
     enabled: !!accessToken && serverUserId !== null,
     staleTime: 1000 * 30,
     retry: 1,
@@ -158,6 +179,23 @@ const FriendRoomIndex = () => {
     insets.bottom + 24,
     PROGRESS_BOTTOM_OFFSET,
   );
+  const guestbookEntries = useMemo<RoomGuestbookListEntry[]>(
+    () =>
+      accessToken
+        ? (serverGuestbookPage?.items.map(mapGuestbookOutToListEntry) ?? [])
+        : friendId
+          ? (guestbookEntriesByFriendId[friendId] ?? [])
+              .slice()
+              .reverse()
+              .map((entry) => ({
+                authorFriendId: entry.friendId,
+                authorName: entry.authorName,
+                id: entry.id,
+                message: entry.message,
+              }))
+          : [],
+    [accessToken, friendId, guestbookEntriesByFriendId, serverGuestbookPage],
+  );
 
   useFocusEffect(
     useCallback(() => {
@@ -167,7 +205,11 @@ const FriendRoomIndex = () => {
 
   const handleTablePress = () => {
     playSoundEffect("basicClick");
-    setIsGuestbookOpen(true);
+    setIsGuestbookListOpen(true);
+  };
+
+  const handleGuestbookWritePress = () => {
+    setIsGuestbookWriteOpen(true);
   };
 
   const handleGuestbookSubmit = async (message: string) => {
@@ -296,9 +338,22 @@ const FriendRoomIndex = () => {
           </View>
         )}
       </SafeAreaView>
-      {isGuestbookOpen ? (
+      {isGuestbookListOpen ? (
+        <GuestbookListModal
+          entries={guestbookEntries}
+          isLoading={
+            !!accessToken &&
+            serverUserId !== null &&
+            isServerGuestbookLoading &&
+            !serverGuestbookPage
+          }
+          onClose={() => setIsGuestbookListOpen(false)}
+          onWritePress={handleGuestbookWritePress}
+        />
+      ) : null}
+      {isGuestbookWriteOpen ? (
         <GuestbookModal
-          onClose={() => setIsGuestbookOpen(false)}
+          onClose={() => setIsGuestbookWriteOpen(false)}
           onSubmit={handleGuestbookSubmit}
         />
       ) : null}
