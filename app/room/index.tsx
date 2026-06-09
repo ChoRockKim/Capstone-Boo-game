@@ -46,7 +46,7 @@ import {
   purchaseShopItem,
   ShopItemOut,
   updateMyCharacter,
-  updateRoomGuestbook,
+  type GuestbookPage,
 } from "@/utils/serverApi";
 import { RoomGuestbookListEntry } from "@/components/Room/RoomGuestbookDummyData";
 import { mapGuestbookOutToListEntry } from "@/utils/serverGuestbookAdapter";
@@ -290,6 +290,9 @@ export default function RoomIndex() {
   const setGameState = useGameStore((state) => state.setGameState);
   const totalXp = useGameStore((state) => state.totalXp);
   const userId = useGameStore((state) => state.userId);
+  const myRoomQueryKey = ["rooms", "me"] as const;
+  const roomShopItemsQueryKey = ["shop", "items"] as const;
+  const guestbookQueryKey = ["rooms", userId, "guestbook"] as const;
   const { data: serverRoom } = useQuery({
     queryKey: ["rooms", "me", accessToken],
     queryFn: () => getMyRoom(accessToken ?? undefined),
@@ -298,7 +301,7 @@ export default function RoomIndex() {
     retry: 1,
   });
   const { data: serverGuestbookPage } = useQuery({
-    queryKey: ["rooms", userId, "guestbook"],
+    queryKey: guestbookQueryKey,
     queryFn: () => listRoomGuestbook(userId ?? 0, accessToken ?? undefined),
     enabled: !!accessToken && userId !== null,
     staleTime: 1000 * 30,
@@ -386,37 +389,35 @@ export default function RoomIndex() {
         return;
       }
 
+      await queryClient.cancelQueries({ queryKey: guestbookQueryKey });
+      const previousGuestbookPage =
+        queryClient.getQueryData<GuestbookPage>(guestbookQueryKey);
+
+      queryClient.setQueryData<GuestbookPage>(
+        guestbookQueryKey,
+        (currentPage) =>
+          currentPage
+            ? {
+                ...currentPage,
+                items: currentPage.items.filter(
+                  (currentEntry) =>
+                    currentEntry.entry_id !== entry.serverEntryId,
+                ),
+              }
+            : currentPage,
+      );
+
       try {
         await deleteRoomGuestbook(entry.serverEntryId, accessToken);
-        await queryClient.invalidateQueries({
-          queryKey: ["rooms", userId, "guestbook"],
-        });
+        void queryClient.invalidateQueries({ queryKey: guestbookQueryKey });
       } catch (error) {
+        queryClient.setQueryData(guestbookQueryKey, previousGuestbookPage);
         throw new Error(
           getServerApiErrorMessage(error, "방명록을 삭제하지 못했어요."),
         );
       }
     },
-    [accessToken, queryClient, userId],
-  );
-  const handleGuestbookUpdate = useCallback(
-    async (entry: RoomGuestbookListEntry, message: string) => {
-      if (!accessToken || entry.serverEntryId === undefined) {
-        return;
-      }
-
-      try {
-        await updateRoomGuestbook(entry.serverEntryId, message, accessToken);
-        await queryClient.invalidateQueries({
-          queryKey: ["rooms", userId, "guestbook"],
-        });
-      } catch (error) {
-        throw new Error(
-          getServerApiErrorMessage(error, "방명록을 수정하지 못했어요."),
-        );
-      }
-    },
-    [accessToken, queryClient, userId],
+    [accessToken, guestbookQueryKey, queryClient],
   );
   const getVisibleCustomizeOptions = useCallback(
     (
@@ -661,15 +662,19 @@ export default function RoomIndex() {
       }
 
       if (accessToken && selectedServerShopItem) {
+        const previousWallpaperId = equippedRoomWallpaper;
+        setEquippedRoomWallpaper(selectedWallpaperId);
+
         try {
           await equipRoomItem(selectedServerShopItem.item_id, accessToken);
           void queryClient.invalidateQueries({
-            queryKey: ["rooms", "me"],
+            queryKey: myRoomQueryKey,
           });
           void queryClient.invalidateQueries({
-            queryKey: ["shop", "items"],
+            queryKey: roomShopItemsQueryKey,
           });
         } catch (error) {
+          setEquippedRoomWallpaper(previousWallpaperId);
           console.warn("[RoomShop] equip wallpaper request failed", {
             error,
             option: selectedCustomizeOption,
@@ -681,6 +686,8 @@ export default function RoomIndex() {
           );
           return;
         }
+
+        return;
       }
 
       setEquippedRoomWallpaper(selectedWallpaperId);
@@ -713,15 +720,19 @@ export default function RoomIndex() {
     }
 
     if (accessToken && selectedServerShopItem) {
+      const previousRoomItemId = equippedRoomItems[selectedRoomSlotId];
+      setEquippedRoomItem(selectedRoomSlotId, selectedRoomItemId);
+
       try {
         await equipRoomItem(selectedServerShopItem.item_id, accessToken);
         void queryClient.invalidateQueries({
-          queryKey: ["rooms", "me"],
+          queryKey: myRoomQueryKey,
         });
         void queryClient.invalidateQueries({
-          queryKey: ["shop", "items"],
+          queryKey: roomShopItemsQueryKey,
         });
       } catch (error) {
+        setEquippedRoomItem(selectedRoomSlotId, previousRoomItemId);
         console.warn("[RoomShop] equip room item request failed", {
           error,
           option: selectedCustomizeOption,
@@ -733,6 +744,8 @@ export default function RoomIndex() {
         );
         return;
       }
+
+      return;
     }
 
     setEquippedRoomItem(selectedRoomSlotId, selectedRoomItemId);
@@ -1183,7 +1196,6 @@ export default function RoomIndex() {
             entries={guestbookEntries}
             onActionError={showTopAlert}
             onDeleteEntry={handleGuestbookDelete}
-            onUpdateEntry={handleGuestbookUpdate}
             onClose={() => setIsGuestbookListOpen(false)}
           />
         ) : null}

@@ -8,6 +8,7 @@
 import ArrowBackIcon from "@/assets/icons/arrow-back-return.svg";
 import CrossIcon from "@/assets/icons/cross.svg";
 import CoinBox from "@/components/CoinBox/CoinBox";
+import LoadingOverlay from "@/components/LoadingOverlay/LoadingOverlay";
 import MainButton from "@/components/MainButton/MainButton";
 import { simulateFreeThrowShot } from "@/components/MiniGame/freeThrow/freeThrowPhysics";
 import OutlinedText from "@/components/OutlinedText/OutlinedText";
@@ -303,6 +304,9 @@ export default function FreeThrowPlayScreen() {
     visible: false,
   });
   const [isRestartingRound, setIsRestartingRound] = useState(false);
+  const [frozenMarkerProgress, setFrozenMarkerProgress] = useState<
+    number | null
+  >(null);
   const markerProgress = useRef(new Animated.Value(0)).current;
   const markerProgressValueRef = useRef(0);
   const markerLoopRef = useRef<Animated.CompositeAnimation | null>(null);
@@ -440,15 +444,18 @@ export default function FreeThrowPlayScreen() {
     }),
     [ballLayout, width],
   );
+  const markerTravelWidth =
+    gaugeTrackWidth -
+    FREE_THROW_GAME.gauge.innerHorizontalInset * 2 -
+    FREE_THROW_GAME.gauge.markerWidth;
   const markerTranslateX = markerProgress.interpolate({
     inputRange: [0, 1],
-    outputRange: [
-      0,
-      gaugeTrackWidth -
-        FREE_THROW_GAME.gauge.innerHorizontalInset * 2 -
-        FREE_THROW_GAME.gauge.markerWidth,
-    ],
+    outputRange: [0, markerTravelWidth],
   });
+  const activeMarkerTranslateX =
+    gamePhase === "animating" && frozenMarkerProgress !== null
+      ? frozenMarkerProgress * markerTravelWidth
+      : markerTranslateX;
   const shotSimulationTranslateX = shotSimulationProgress.interpolate({
     inputRange: activeShotSimulation.inputRange,
     outputRange: activeShotSimulation.translateX,
@@ -583,6 +590,7 @@ export default function FreeThrowPlayScreen() {
       }
 
       clearInterval(countdownTimer);
+      setFrozenMarkerProgress(null);
       setGamePhase("playing");
       gamePhaseRef.current = "playing";
     }, 1000);
@@ -611,6 +619,7 @@ export default function FreeThrowPlayScreen() {
     markerProgress.stopAnimation();
     shotSimulationProgress.stopAnimation();
     setIsShotSimulationAnimating(false);
+    setFrozenMarkerProgress(null);
     markerProgressValueRef.current = 0;
     markerProgress.setValue(0);
     ballTranslateX.setValue(0);
@@ -976,43 +985,46 @@ export default function FreeThrowPlayScreen() {
     markerLoopRef.current?.stop();
     markerProgress.stopAnimation((value) => {
       markerProgressValueRef.current = value;
-    });
-    gamePhaseRef.current = "animating";
-    setGamePhase("animating");
+      setFrozenMarkerProgress(value);
+      markerProgress.setValue(value);
+      gamePhaseRef.current = "animating";
+      setGamePhase("animating");
 
-    const markerCenter =
-      markerProgressValueRef.current *
-      (gaugeTrackWidth - FREE_THROW_GAME.gauge.innerHorizontalInset * 2);
-    const targetLeft = gaugeTarget.left;
-    const targetRight = gaugeTarget.left + gaugeTarget.width;
-    const gaugeContentWidth =
-      gaugeTrackWidth - FREE_THROW_GAME.gauge.innerHorizontalInset * 2;
-    const outcome: FreeThrowOutcome =
-      markerCenter >= targetLeft && markerCenter <= targetRight
-        ? "success"
-        : markerCenter > targetRight
-          ? "overPower"
-          : "underPower";
-    const missRatio =
-      outcome === "success"
-        ? 0
-        : outcome === "underPower"
-          ? Math.min(
-              Math.max((targetLeft - markerCenter) / Math.max(targetLeft, 1), 0),
-              1,
-            )
-          : Math.min(
-              Math.max(
-                (markerCenter - targetRight) /
-                  Math.max(gaugeContentWidth - targetRight, 1),
-                0,
-              ),
-              1,
-            );
+      const gaugeContentWidth =
+        gaugeTrackWidth - FREE_THROW_GAME.gauge.innerHorizontalInset * 2;
+      const markerCenter = value * gaugeContentWidth;
+      const targetLeft = gaugeTarget.left;
+      const targetRight = gaugeTarget.left + gaugeTarget.width;
+      const outcome: FreeThrowOutcome =
+        markerCenter >= targetLeft && markerCenter <= targetRight
+          ? "success"
+          : markerCenter > targetRight
+            ? "overPower"
+            : "underPower";
+      const missRatio =
+        outcome === "success"
+          ? 0
+          : outcome === "underPower"
+            ? Math.min(
+                Math.max(
+                  (targetLeft - markerCenter) / Math.max(targetLeft, 1),
+                  0,
+                ),
+                1,
+              )
+            : Math.min(
+                Math.max(
+                  (markerCenter - targetRight) /
+                    Math.max(gaugeContentWidth - targetRight, 1),
+                  0,
+                ),
+                1,
+              );
 
-    void resolveShot({
-      missRatio,
-      outcome,
+      void resolveShot({
+        missRatio,
+        outcome,
+      });
     });
   }, [
     gaugeTarget.left,
@@ -1278,7 +1290,7 @@ export default function FreeThrowPlayScreen() {
                   style={[
                     styles.gaugeMarker,
                     {
-                      transform: [{ translateX: markerTranslateX }],
+                      transform: [{ translateX: activeMarkerTranslateX }],
                       width: FREE_THROW_GAME.gauge.markerWidth,
                     },
                   ]}
@@ -1310,6 +1322,12 @@ export default function FreeThrowPlayScreen() {
             {countdownValue}
           </OutlinedText>
         </View>
+      ) : null}
+
+      {gamePhase === "preparing" || isRestartingRound ? (
+        <LoadingOverlay
+          label={isRestartingRound ? "Restarting..." : "Preparing..."}
+        />
       ) : null}
 
       {gamePhase === "ended" ? (

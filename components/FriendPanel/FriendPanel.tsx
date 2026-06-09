@@ -1,21 +1,23 @@
 import CrossIcon from "@/assets/icons/cross.svg";
 import UserAdd from "@/assets/icons/user-add.svg";
+import TopAlert from "@/components/TopAlert/TopAlert";
 import { colors } from "@/constants/colors";
 import { fonts } from "@/constants/fonts";
 import { useGameStore } from "@/stores/useGameStore";
 import {
   acceptFriendRequest,
   deleteFriendRequest,
-  FriendRequestOut,
   listFriendRequests,
   listFriends,
+  type FriendOut,
+  type FriendRequestOut,
 } from "@/utils/serverApi";
 import { mapFriendOutToFriendListItem } from "@/utils/serverFriendAdapter";
 import { playSoundEffect } from "@/utils/soundEffects";
 import { Feather } from "@expo/vector-icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { router } from "expo-router";
-import React, { useMemo, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import { FlatList, Pressable, StyleSheet, Text, View } from "react-native";
 import { FriendListItem } from "../FriendList/FriendListDummyData";
 import FriendAddModal from "./FriendAddModal";
@@ -24,6 +26,13 @@ import FriendPanelButton from "./FriendPanelButton";
 interface FriendPanelProps {
   setIsFriendOpen: React.Dispatch<React.SetStateAction<boolean>>;
 }
+
+type FriendPanelAlertState = {
+  id: number;
+  message: string;
+  title: string;
+  visible: boolean;
+};
 
 const INITIAL_VISIBLE_COUNT = 5;
 const PAGE_SIZE = 5;
@@ -37,18 +46,27 @@ const FriendPanel = ({ setIsFriendOpen }: FriendPanelProps) => {
   const isGuestMode = useGameStore((state) => state.isGuestMode);
   const userId = useGameStore((state) => state.userId);
   const queryClient = useQueryClient();
+  const [friendPanelAlert, setFriendPanelAlert] =
+    useState<FriendPanelAlertState>({
+      id: 0,
+      message: "",
+      title: "",
+      visible: false,
+    });
   const [isFriendAddOpen, setIsFriendAddOpen] = useState(false);
   const [processingRequestIds, setProcessingRequestIds] = useState<number[]>([]);
   const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_COUNT);
+  const friendListQueryKey = ["friends", accessToken] as const;
+  const friendRequestsQueryKey = ["friends", "requests", accessToken] as const;
   const { data: serverFriends, refetch: refetchServerFriends } = useQuery({
-    queryKey: ["friends", accessToken],
+    queryKey: friendListQueryKey,
     queryFn: () => listFriends(accessToken ?? undefined),
     enabled: !!accessToken,
     staleTime: 1000 * 30,
     retry: 1,
   });
   const { data: friendRequests } = useQuery({
-    queryKey: ["friends", "requests", accessToken],
+    queryKey: friendRequestsQueryKey,
     queryFn: () => listFriendRequests(accessToken ?? undefined),
     enabled: !!accessToken,
     staleTime: 1000 * 30,
@@ -84,6 +102,22 @@ const FriendPanel = ({ setIsFriendOpen }: FriendPanelProps) => {
     [clampedVisibleCount, displayFriendList],
   );
   const hasMoreFriends = clampedVisibleCount < displayFriendList.length;
+
+  const showFriendPanelAlert = useCallback((title: string, message: string) => {
+    setFriendPanelAlert((currentAlert) => ({
+      id: currentAlert.id + 1,
+      message,
+      title,
+      visible: true,
+    }));
+  }, []);
+
+  const hideFriendPanelAlert = useCallback(() => {
+    setFriendPanelAlert((currentAlert) => ({
+      ...currentAlert,
+      visible: false,
+    }));
+  }, []);
 
   const handleClosePress = () => {
     playSoundEffect("basicClick");
@@ -121,8 +155,63 @@ const FriendPanel = ({ setIsFriendOpen }: FriendPanelProps) => {
   const refetchFriendData = () => {
     void refetchServerFriends();
     void queryClient.invalidateQueries({
-      queryKey: ["friends", "requests", accessToken],
+      queryKey: friendRequestsQueryKey,
     });
+  };
+
+  const applyOptimisticRequestChange = async (
+    request: FriendRequestOut,
+    options?: {
+      addFriend?: boolean;
+    },
+  ) => {
+    await queryClient.cancelQueries({ queryKey: friendRequestsQueryKey });
+    await queryClient.cancelQueries({ queryKey: friendListQueryKey });
+
+    const previousRequests =
+      queryClient.getQueryData<FriendRequestOut[]>(friendRequestsQueryKey);
+    const previousFriends =
+      queryClient.getQueryData<FriendOut[]>(friendListQueryKey);
+
+    queryClient.setQueryData<FriendRequestOut[]>(
+      friendRequestsQueryKey,
+      (currentRequests) =>
+        currentRequests?.filter(
+          (currentRequest) =>
+            currentRequest.request_id !== request.request_id,
+        ) ?? currentRequests,
+    );
+
+    if (options?.addFriend) {
+      const optimisticFriend: FriendOut = {
+        created_at: new Date().toISOString(),
+        friend: request.requester,
+        friend_id: -request.request_id,
+      };
+
+      queryClient.setQueryData<FriendOut[]>(
+        friendListQueryKey,
+        (currentFriends) => {
+          const friends = currentFriends ?? [];
+
+          if (
+            friends.some(
+              (friend) =>
+                friend.friend.user_id === optimisticFriend.friend.user_id,
+            )
+          ) {
+            return friends;
+          }
+
+          return [optimisticFriend, ...friends];
+        },
+      );
+    }
+
+    return () => {
+      queryClient.setQueryData(friendRequestsQueryKey, previousRequests);
+      queryClient.setQueryData(friendListQueryKey, previousFriends);
+    };
   };
 
   const handleAcceptRequest = async (request: FriendRequestOut) => {
@@ -136,12 +225,28 @@ const FriendPanel = ({ setIsFriendOpen }: FriendPanelProps) => {
       request.request_id,
     ]);
 
+    const rollbackOptimisticChange = await applyOptimisticRequestChange(
+      request,
+      {
+        addFriend: true,
+      },
+    );
+
     try {
       const result = await acceptFriendRequest(request.request_id, accessToken);
 
       applyServerUnlockedAchievements(result.unlocked_achievements);
+      showFriendPanelAlert(
+        "친구 요청 수락",
+        `${request.requester.nickname}님과 친구가 되었어요.`,
+      );
       refetchFriendData();
     } catch (error) {
+      rollbackOptimisticChange();
+      showFriendPanelAlert(
+        "수락 실패",
+        "친구 요청을 수락하지 못했어요.",
+      );
       console.warn("친구 요청 수락 실패", error);
     } finally {
       setProcessingRequestIds((currentIds) =>
@@ -161,10 +266,22 @@ const FriendPanel = ({ setIsFriendOpen }: FriendPanelProps) => {
       request.request_id,
     ]);
 
+    const rollbackOptimisticChange =
+      await applyOptimisticRequestChange(request);
+
     try {
       await deleteFriendRequest(request.request_id, accessToken);
+      showFriendPanelAlert(
+        "친구 요청 거절",
+        `${request.requester.nickname}님의 요청을 거절했어요.`,
+      );
       refetchFriendData();
     } catch (error) {
+      rollbackOptimisticChange();
+      showFriendPanelAlert(
+        "거절 실패",
+        "친구 요청을 거절하지 못했어요.",
+      );
       console.warn("친구 요청 거절 실패", error);
     } finally {
       setProcessingRequestIds((currentIds) =>
@@ -300,6 +417,14 @@ const FriendPanel = ({ setIsFriendOpen }: FriendPanelProps) => {
           }}
         />
       ) : null}
+      <TopAlert
+        message={friendPanelAlert.message}
+        onClose={hideFriendPanelAlert}
+        textSize="compact"
+        title={friendPanelAlert.title}
+        visible={friendPanelAlert.visible}
+        visibilityKey={friendPanelAlert.id}
+      />
     </View>
   );
 };

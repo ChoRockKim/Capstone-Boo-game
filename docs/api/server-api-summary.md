@@ -72,6 +72,23 @@
   - `/user/me/image`는 OpenAPI에 있으나 현재 설정 UI에서는 프로필 이미지 변경/삭제 workflow를 제거함.
   - 정책상 유지 가능하지만, 현재 활성 프론트 기능은 아님.
 
+## 2026-06-09 Frontend Integration Status
+
+- Current project status document:
+  - `docs/current-project-status.md`에 아키텍처, 활성 기능, 완료 작업, 알려진 에러/리스크, 주의사항을 분리해 정리함.
+  - `docs/domain-evolution-history.md`에 도메인별 사용 기술, 구현 방식, 업그레이드 과정, 어려움을 상세 정리함.
+- Optimistic updates:
+  - 친구 요청 수락/거절은 React Query cache에서 받은 요청을 즉시 제거하고, 수락 시 친구 목록에 임시 친구를 추가한 뒤 실패 시 rollback함.
+  - 방명록 수정/삭제는 `GuestbookPage.items` cache를 즉시 수정하고 실패 시 rollback함.
+  - 친구 방 방명록 작성은 임시 entry를 cache에 추가하고 서버 응답의 실제 entry로 치환함.
+  - 마이룸 가구/벽지 장착은 로컬 장착 상태를 먼저 바꾸고 서버 `/rooms/me/equip` 실패 시 이전 상태로 rollback함.
+- Non-optimistic server-authoritative flows:
+  - 상점 구매는 코인/소유권 변경이므로 서버 `purchaseShopItem` 성공 후 로컬 owned/equipped 상태를 반영함.
+  - 미니게임 시작/하트 차감은 서버 세션 권위가 필요하므로 loading overlay/pending UI를 사용함.
+- Free throw UX:
+  - 플레이 시작/재시작 준비 중에는 LoadingOverlay를 표시함.
+  - 슛 버튼을 누른 순간의 게이지 바 위치를 애니메이션 중에도 유지함.
+
 ## Backend Reference Notes
 
 이 섹션은 백엔드 README/운영 메모 기반 보조 설명입니다. 아래 정책은 OpenAPI 스키마와 함께 확인하고, 실제 서버 동작이 다르면 Swagger/실서버 응답을 우선합니다.

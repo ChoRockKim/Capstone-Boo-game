@@ -30,6 +30,7 @@ import {
   createRoomGuestbook,
   getServerApiErrorMessage,
   getUserRoom,
+  type GuestbookPage,
 } from "@/utils/serverApi";
 import { mapServerRoomViewToLocalRoomState } from "@/utils/serverRoomAdapter";
 import { playSoundEffect } from "@/utils/soundEffects";
@@ -92,6 +93,8 @@ const FriendRoomIndex = () => {
   const addGuestbookEntry = useGameStore((state) => state.addGuestbookEntry);
   const friendList = useGameStore((state) => state.friendList);
   const isGuestMode = useGameStore((state) => state.isGuestMode);
+  const currentUserId = useGameStore((state) => state.userId);
+  const currentUserNickname = useGameStore((state) => state.userNickname);
   const queryClient = useQueryClient();
   const [isGuestbookOpen, setIsGuestbookOpen] = useState(false);
 
@@ -111,6 +114,7 @@ const FriendRoomIndex = () => {
     friend?.serverUserId ??
     (Number.isFinite(parsedFriendUserId) ? parsedFriendUserId : null) ??
     (Number.isFinite(serverUserIdFromFriendId) ? serverUserIdFromFriendId : null);
+  const guestbookQueryKey = ["rooms", serverUserId, "guestbook"] as const;
   const { data: serverRoom } = useQuery({
     queryKey: ["rooms", serverUserId, accessToken],
     queryFn: () => getUserRoom(serverUserId ?? 0, accessToken ?? undefined),
@@ -172,12 +176,55 @@ const FriendRoomIndex = () => {
     }
 
     if (accessToken && serverUserId !== null) {
+      await queryClient.cancelQueries({ queryKey: guestbookQueryKey });
+      const previousGuestbookPage =
+        queryClient.getQueryData<GuestbookPage>(guestbookQueryKey);
+      const optimisticEntryId = -Date.now();
+
+      queryClient.setQueryData<GuestbookPage>(
+        guestbookQueryKey,
+        (currentPage) => ({
+          items: [
+            {
+              content: message,
+              created_at: new Date().toISOString(),
+              entry_id: optimisticEntryId,
+              room_owner_id: serverUserId,
+              writer_id: currentUserId ?? 0,
+              writer_nickname: currentUserNickname || "나",
+            },
+            ...(currentPage?.items ?? []),
+          ],
+          next_cursor: currentPage?.next_cursor ?? null,
+        }),
+      );
+
       try {
-        await createRoomGuestbook(serverUserId, message, accessToken);
-        await queryClient.invalidateQueries({
-          queryKey: ["rooms", serverUserId, "guestbook"],
+        const createdEntry = await createRoomGuestbook(
+          serverUserId,
+          message,
+          accessToken,
+        );
+
+        queryClient.setQueryData<GuestbookPage>(
+          guestbookQueryKey,
+          (currentPage) =>
+            currentPage
+              ? {
+                  ...currentPage,
+                  items: currentPage.items.map((entry) =>
+                    entry.entry_id === optimisticEntryId
+                      ? createdEntry
+                      : entry,
+                  ),
+                }
+              : currentPage,
+        );
+        void queryClient.invalidateQueries({
+          queryKey: guestbookQueryKey,
         });
       } catch (error) {
+        queryClient.setQueryData(guestbookQueryKey, previousGuestbookPage);
         const message = getServerApiErrorMessage(error, "방명록 작성 실패");
 
         console.warn("서버 방명록 작성 실패", message);
