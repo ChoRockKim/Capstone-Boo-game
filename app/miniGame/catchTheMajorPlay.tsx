@@ -817,6 +817,7 @@ const CatchTheMajorPlayScreen = () => {
           mode: isInfiniteMode ? "infinite" : "normal",
           play_session_id: playSessionIdRef.current,
           score: finalScore,
+          success: true,
         },
         accessToken,
       );

@@ -4,6 +4,7 @@
  * @used-by      components/Login/Login.tsx, components/Register/RegisterEmail.tsx
  * @side-effects HTTP 요청
  */
+import type { CharacterCostumeKey } from "@/constants/character";
 import { AxiosError, AxiosRequestConfig, create, isAxiosError } from "axios";
 
 export const BOO_API_BASE_URL =
@@ -157,6 +158,7 @@ export type UserOut = {
   user_id: number;
   xp_point: number;
   is_admin?: boolean;
+  graduated_at?: string | null;
 };
 
 export type UserAccountUpdate = {
@@ -208,7 +210,7 @@ export type SchoolFoodFeedResult = {
 };
 
 export type QuizQuestionOut = {
-  answer?: string | null;
+  answer: string;
   options?: Record<string, string> | string[] | null;
   question: string;
   quiz_id: number;
@@ -249,6 +251,10 @@ export type BooCharacter = {
 export type CharacterMeOut = {
   character_id: number;
   character_name: string;
+  equipped_skin_key?: CharacterCostumeKey | null;
+  grade?: number;
+  name?: string;
+  nickname?: string;
   pending_evolution?: boolean;
   stage: number;
   state: string;
@@ -257,6 +263,7 @@ export type CharacterMeOut = {
 
 export type CharacterMeUpdate = {
   character_name?: string | null;
+  equipped_skin_key?: CharacterCostumeKey | null;
   state?: string | null;
 };
 
@@ -423,6 +430,7 @@ export type RoomOwnerOut = FriendUser & {
 export type RoomCharacterOut = {
   character_id?: number | null;
   character_name?: string | null;
+  equipped_skin_key?: CharacterCostumeKey | null;
   stage: number;
   state?: string | null;
   xp_point: number;
@@ -476,7 +484,7 @@ export type TutorialFlags = {
 };
 
 export type AppBootstrap = {
-  character?: BooCharacter | null;
+  character?: CharacterMeOut | null;
   economy: EconomyStatus;
   room: RoomView;
   shop_items: ShopItemOut[];
@@ -522,6 +530,35 @@ export type AchievementEventResult = {
   event_type: string;
   unlocked_achievements: ServerUnlockedAchievement[];
   xp_point: number;
+};
+
+export type MiniGameBestScore = {
+  best_score: number;
+  game_type?: string | null;
+  mode?: string | null;
+};
+
+export type GraduationSummary = {
+  created_at?: string | null;
+  feed_count: number;
+  graduated_at?: string | null;
+  minigame_best_scores: MiniGameBestScore[];
+  play_days: number;
+  quiz_attempt_count: number;
+  quiz_correct_count: number;
+  user_id: number;
+};
+
+export type DebugMePatch = {
+  character_state?: string | null;
+  coin?: number | null;
+  stage?: number | null;
+  xp_point?: number | null;
+};
+
+export type DebugMeResult = {
+  character?: CharacterMeOut | null;
+  user: UserOut;
 };
 
 export type ShopItemPurchaseResult = {
@@ -760,6 +797,56 @@ export const getAppBootstrap = async (accessToken?: string) => {
         }
       : undefined,
   });
+
+  return response.data;
+};
+
+export const getGraduationSummary = async (accessToken?: string) => {
+  const response = await booApiClient.get<GraduationSummary>(
+    "/graduation/summary",
+    {
+      headers: accessToken
+        ? {
+            Authorization: `Bearer ${accessToken}`,
+          }
+        : undefined,
+    },
+  );
+
+  return response.data;
+};
+
+export const confirmGraduation = async (accessToken?: string) => {
+  const response = await booApiClient.post<GraduationSummary>(
+    "/graduation/confirm",
+    undefined,
+    {
+      headers: accessToken
+        ? {
+            Authorization: `Bearer ${accessToken}`,
+          }
+        : undefined,
+    },
+  );
+
+  return response.data;
+};
+
+export const patchMyDebugState = async (
+  params: DebugMePatch,
+  accessToken?: string,
+) => {
+  const response = await booApiClient.patch<DebugMeResult>(
+    "/debug/me",
+    params,
+    {
+      headers: accessToken
+        ? {
+            Authorization: `Bearer ${accessToken}`,
+          }
+        : undefined,
+    },
+  );
 
   return response.data;
 };
@@ -1286,6 +1373,7 @@ export const rewardMiniGameEconomy = async (
     mode?: MiniGameMode;
     play_session_id: string;
     score: number;
+    success?: boolean | null;
   },
   accessToken?: string,
 ) => {
@@ -1384,7 +1472,13 @@ export const listFriendMiniGameRankings = async (
   return response.data;
 };
 
-export const getMyMiniGameRanking = async (accessToken?: string) => {
+export const getMyMiniGameRanking = async (
+  params?: {
+    game_type?: string;
+    mode?: MiniGameMode;
+  },
+  accessToken?: string,
+) => {
   const response = await booApiClient.get<MiniGameRankingMe>(
     "/minigames/ranking/me",
     {
@@ -1393,6 +1487,7 @@ export const getMyMiniGameRanking = async (accessToken?: string) => {
             Authorization: `Bearer ${accessToken}`,
           }
         : undefined,
+      params,
     },
   );
 

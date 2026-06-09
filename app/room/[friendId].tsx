@@ -18,7 +18,11 @@ import RoomScene from "@/components/Room/RoomScene";
 import SquareButton from "@/components/SquareButton/SquareButton";
 import { colors } from "@/constants/colors";
 import { fonts } from "@/constants/fonts";
-import { CharacterState } from "@/constants/character";
+import {
+  isCharacterCostumeKey,
+  type CharacterCostumeKey,
+  type CharacterState,
+} from "@/constants/character";
 import { useGameStore } from "@/stores/useGameStore";
 import { useRequirePlayableSession } from "@/useHook/useRequirePlayableSession";
 import { startBackgroundMusicSession } from "@/utils/backgroundMusic";
@@ -60,6 +64,11 @@ const getServerCharacterState = (
     ? (state as CharacterState)
     : "basic1";
 };
+
+const getServerCharacterCostumeKey = (
+  costumeKey: string | null | undefined,
+): CharacterCostumeKey =>
+  isCharacterCostumeKey(costumeKey) ? costumeKey : "default";
 
 const FriendRoomIndex = () => {
   const insets = useSafeAreaInsets();
@@ -118,6 +127,9 @@ const FriendRoomIndex = () => {
           serverRoom.character?.character_name?.trim() ||
           `${displayFriendName}의 부`,
         characterState: getServerCharacterState(serverRoom.character?.state),
+        characterCostumeKey: getServerCharacterCostumeKey(
+          serverRoom.character?.equipped_skin_key,
+        ),
         totalXp:
           serverRoom.character?.xp_point ?? serverRoom.owner.xp_point ?? 0,
       }
@@ -199,6 +211,11 @@ const FriendRoomIndex = () => {
           <>
             <View style={styles.roomStage}>
               <RoomScene
+                characterCostumeKey={
+                  "characterCostumeKey" in roomSnapshot
+                    ? roomSnapshot.characterCostumeKey
+                    : "default"
+                }
                 characterState={roomSnapshot.characterState}
                 equippedRoomItems={roomSnapshot.equippedRoomItems}
                 grade={xpProgress.grade}

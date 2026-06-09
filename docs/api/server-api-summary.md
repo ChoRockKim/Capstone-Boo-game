@@ -19,7 +19,7 @@
 
 ## 2026-06-04 OpenAPI Update Notes
 
-- Operation count increased from 60 to 87 and schema count increased from 50 to 86.
+- Operation count increased from 60 to 90 and schema count increased from 50 to 90.
 - `GET /school-foods/today` now returns `SchoolFoodToday` with `sections[]`, not a flat `SchoolFood[]`.
 - `GET /rooms/{user_id}/guestbook` now returns `GuestbookPage` with `items[]` and `next_cursor`.
 - Mini-game ranking list APIs are now available:
@@ -33,43 +33,41 @@
 - User profile image and preferences APIs were added under `/user/me/image` and `/user/me/preferences`.
 - Frontend currently does not expose profile image edit/delete in the settings profile UI. `/user/me/image` remains documented as an available backend endpoint, not an active frontend workflow.
 - User-scoped character APIs were added under `/characters/me`, including XP, evolution confirmation, meal health, and meal penalty.
-- Character costume/equipped skin persistence is still missing from the OpenAPI. Frontend currently supports local closet selection for `default`, `skin_truth`, `skin_peace`, and `skin_creation`, but no server field stores the selected key.
+- Character costume/equipped skin persistence now uses `equipped_skin_key` on `CharacterMeOut`, `CharacterMeUpdate`, `AppBootstrap.character`, and `RoomCharacterOut`.
 - Achievement APIs were added under `/achievements`, and many gameplay responses can include `unlocked_achievements`.
 - Several admin-like CRUD endpoints that were previously public now require auth in the OpenAPI security metadata.
 
-## 2026-06-07 Costume API Gap Notes
+## 2026-06-07 Costume API Notes
 
-- Local and remote OpenAPI were checked for costume/skin/outfit/appearance persistence.
-- No current schema field stores the selected character costume.
-- Frontend now has local closet selection, but server persistence needs a new contract.
-- Recommended contract: add `equipped_skin_key` to `CharacterMeOut`, `CharacterMeUpdate`, and `AppBootstrap.character`.
-- Include `equipped_skin_key` in `RoomCharacterOut` too if friend rooms should show the other user's selected costume.
+- Local and remote OpenAPI were checked for costume/skin/outfit/appearance persistence, and the backend contract has since been added.
+- Frontend closet selection stores `default`, `skin_truth`, `skin_peace`, and `skin_creation` through `PUT /characters/me.equipped_skin_key`.
+- `equipped_skin_key` is read from `CharacterMeOut` during login sync and from `RoomCharacterOut` for friend room rendering.
 - Do not overload `state`; it is already used for character behavior state.
 
-## 2026-06-08 Backend Contract Updates Needed
+## 2026-06-08 Backend Contract Status
 
-최근 프론트 보강 후에도 백엔드 계약이 추가되어야 완전히 서버 권위 상태로 전환되는 항목입니다.
+최근 프론트 보강 후 백엔드 계약 반영 여부와 현재 프론트 연결 상태입니다.
 
 - Character costume persistence:
-  - `CharacterMeOut`, `CharacterMeUpdate`, `AppBootstrap.character`, `RoomCharacterOut`에 `equipped_skin_key` 추가 필요.
+  - `CharacterMeOut`, `CharacterMeUpdate`, `AppBootstrap.character`, `RoomCharacterOut`에 `equipped_skin_key` 반영됨.
   - 허용값은 `default`, `skin_truth`, `skin_peace`, `skin_creation`.
   - non-default skin은 업적 보상 소유 여부를 서버에서 검증해야 함.
 - Graduation summary:
-  - 현재 졸업 화면의 플레이 일수는 가입일(`created_at`) 기준으로 프론트에서 계산함.
-  - 졸업 화면의 학식 횟수, 퀴즈 정답 수, 미니게임 최고 점수는 로컬/게스트 통계로 표시함.
-  - 계정/기기 간 일관된 졸업 리포트가 필요하면 서버가 `feed_count`, `quiz_correct_count`, `minigame_best_scores`, `graduated_at` 같은 요약 필드를 제공해야 함.
+  - `/graduation/summary`, `/graduation/confirm` 및 `GraduationSummary`가 OpenAPI에 반영됨.
+  - 로그인 유저 졸업 화면은 서버 summary 응답을 우선 표시하고, 실패/게스트는 로컬 통계로 fallback함.
 - Guest mode:
   - 게스트 모드는 로컬 전용 정책임. `accessToken`을 비우고 API Authorization header를 제거한 뒤 `guestGameSnapshot`만 사용함.
   - 게스트에서는 친구 목록, 친구 추가, 친구 방, 방명록, 친구 랭킹 API를 호출하지 않고 사용 불가 모달을 표시함.
   - 게스트 진행도를 서버와 병합하는 기능은 현재 없음. 추후 계정 전환/가입 시 이관이 필요하면 별도 import/merge API가 필요함.
 - Developer panel:
-  - 현재 서버에 반영되는 항목은 부 이름, 부 상태, 튜토리얼 조회 초기화 중심임.
-  - 코인 직접 조작, XP 절대값 설정/감소, 학년 강제 변경, 식사/퀴즈 제한 토글은 서버 admin/debug endpoint가 없어 로컬 테스트 상태로만 처리함.
-  - 서버 반영이 필요하면 authenticated admin-only debug API가 필요함.
+  - 부 이름은 `PUT /characters/me.character_name`, 튜토리얼 조회 초기화는 `PUT /user/me/preferences`로 서버에 반영함.
+  - 코인, XP, 학년, 부 상태 디버그 조작은 `/debug/me`로 서버에 반영함.
+  - 식사/퀴즈 제한 토글은 서버 debug schema에 없어 로컬 테스트 상태로만 처리함.
 - Mini-game results:
   - 로그인 상태는 `/economy/minigame/start`, `/economy/minigame/reward`, `/minigames/results`를 사용함.
   - 게스트는 로컬 하트/보상/통계만 사용함.
-  - 결과 저장과 보상 지급의 중복 방지를 서버에서 보장하려면 `play_session_id` 기준 idempotency 정책을 명확히 해야 함.
+  - `/economy/minigame/reward`는 `success` 필드를 받을 수 있고, 프론트는 성공 보상 요청에 `success: true`를 명시함.
+  - 결과 저장과 보상 지급의 중복 방지는 서버가 `play_session_id` 기준 idempotency로 보장해야 함.
 - Profile image:
   - `/user/me/image`는 OpenAPI에 있으나 현재 설정 UI에서는 프로필 이미지 변경/삭제 workflow를 제거함.
   - 정책상 유지 가능하지만, 현재 활성 프론트 기능은 아님.
@@ -780,10 +778,10 @@ Required: -
 - Several admin-like CRUD endpoints now require auth in the current spec. App integration should prefer authenticated user-scoped endpoints where available.
 - `/user/me/image` exists in the OpenAPI, but profile image editing was removed from the current settings UI. Keep the endpoint for backend compatibility unless product policy says to remove it from the API too.
 - `POST /economy/minigame/play` still has no request body in the spec. Prefer the newer `/economy/minigame/start` and `/economy/minigame/reward` flow for new gameplay wiring.
-- `/minigames/ranking/me` still has no game type query parameter in the spec. Use `/minigames/rankings` or `/minigames/rankings/friends` for game/mode-specific ranking lists.
-- `CharacterMeOut`, `CharacterMeUpdate`, `AppBootstrap.character`, `RoomCharacterOut`에는 아직 `equipped_skin_key`가 없습니다. 코스튬 장착 상태를 기기 간 동기화하거나 친구 방에서 표시하려면 백엔드 명세 추가가 필요합니다.
-- 졸업 화면에 표시하는 누적 학식/퀴즈/미니게임 통계는 현재 로컬 통계입니다. 서버 기준 졸업 리포트를 원하면 통계 요약 API 또는 bootstrap field가 필요합니다.
+- `/minigames/ranking/me` now accepts `game_type` and `mode` query parameters. Ranking list screens still primarily use `/minigames/rankings` and `/minigames/rankings/friends`.
+- `CharacterMeOut`, `CharacterMeUpdate`, `AppBootstrap.character`, `RoomCharacterOut` now include `equipped_skin_key`; frontend sync and friend room rendering are connected.
+- 졸업 화면은 로그인 상태에서 `/graduation/confirm`의 `GraduationSummary`를 우선 사용하고, 게스트/서버 실패 시 로컬 통계로 fallback합니다.
 - 게스트 모드는 서버와 동기화하지 않는 로컬 전용 상태입니다. 게스트에서 친구/방명록/친구 랭킹 API를 호출하지 않도록 프론트에서 차단합니다.
-- 개발자 패널의 XP/학년/코인 강제 조작은 현재 서버 admin/debug 계약이 없어 서버에 반영하지 않습니다.
+- 개발자 패널의 XP/학년/코인/부 상태 강제 조작은 `/debug/me`로 서버에 반영합니다. 식사/퀴즈 제한 토글은 로컬 전용입니다.
 - Server field names use snake_case; frontend state currently uses camelCase. Add mapper functions instead of leaking snake_case into UI/store code.
 - README의 학식 시간대와 기존 프론트 상수의 시간대가 다를 수 있습니다. 서버 연동 시 `GET /school-foods/feed-status` 응답을 기준으로 UI 상태를 맞추는 편이 안전합니다.

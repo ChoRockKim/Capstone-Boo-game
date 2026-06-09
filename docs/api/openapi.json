@@ -781,11 +781,6 @@
         ],
         "summary": "List School Foods",
         "operationId": "list_school_foods_school_foods__get",
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ],
         "parameters": [
           {
             "name": "type",
@@ -932,11 +927,6 @@
         ],
         "summary": "Get School Food",
         "operationId": "get_school_food_school_foods__school_food_id__get",
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ],
         "parameters": [
           {
             "name": "school_food_id",
@@ -3521,6 +3511,104 @@
         ]
       }
     },
+    "/graduation/summary": {
+      "get": {
+        "tags": [
+          "graduation"
+        ],
+        "summary": "Get Graduation Summary",
+        "operationId": "get_graduation_summary_graduation_summary_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GraduationSummary"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ]
+      }
+    },
+    "/graduation/confirm": {
+      "post": {
+        "tags": [
+          "graduation"
+        ],
+        "summary": "Confirm Graduation",
+        "operationId": "confirm_graduation_graduation_confirm_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GraduationSummary"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ]
+      }
+    },
+    "/debug/me": {
+      "patch": {
+        "tags": [
+          "debug"
+        ],
+        "summary": "Patch My Debug State",
+        "operationId": "patch_my_debug_state_debug_me_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DebugMePatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DebugMeResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ]
+      }
+    },
     "/": {
       "get": {
         "summary": "Root",
@@ -3742,7 +3830,7 @@
           "character": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/Character"
+                "$ref": "#/components/schemas/CharacterMeOut"
               },
               {
                 "type": "null"
@@ -3906,6 +3994,18 @@
             "title": "State",
             "default": "basic1"
           },
+          "equipped_skin_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Equipped Skin Key",
+            "default": "default"
+          },
           "character_id": {
             "type": "integer",
             "title": "Character Id"
@@ -3983,6 +4083,18 @@
             ],
             "title": "State",
             "default": "basic1"
+          },
+          "equipped_skin_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Equipped Skin Key",
+            "default": "default"
           }
         },
         "type": "object",
@@ -4002,9 +4114,21 @@
             "type": "string",
             "title": "Character Name"
           },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "nickname": {
+            "type": "string",
+            "title": "Nickname"
+          },
           "stage": {
             "type": "integer",
             "title": "Stage"
+          },
+          "grade": {
+            "type": "integer",
+            "title": "Grade"
           },
           "xp_point": {
             "type": "integer",
@@ -4013,6 +4137,11 @@
           "state": {
             "type": "string",
             "title": "State"
+          },
+          "equipped_skin_key": {
+            "type": "string",
+            "title": "Equipped Skin Key",
+            "default": "default"
           },
           "pending_evolution": {
             "type": "boolean",
@@ -4024,7 +4153,10 @@
         "required": [
           "character_id",
           "character_name",
+          "name",
+          "nickname",
           "stage",
+          "grade",
           "xp_point",
           "state"
         ],
@@ -4053,6 +4185,17 @@
               }
             ],
             "title": "State"
+          },
+          "equipped_skin_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Equipped Skin Key"
           }
         },
         "type": "object",
@@ -4189,6 +4332,17 @@
               }
             ],
             "title": "State"
+          },
+          "equipped_skin_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Equipped Skin Key"
           }
         },
         "type": "object",
@@ -4252,6 +4406,78 @@
           "pending_evolution"
         ],
         "title": "CharacterXpResult"
+      },
+      "DebugMePatch": {
+        "properties": {
+          "coin": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Coin"
+          },
+          "xp_point": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Xp Point"
+          },
+          "stage": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stage"
+          },
+          "character_state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Character State"
+          }
+        },
+        "type": "object",
+        "title": "DebugMePatch"
+      },
+      "DebugMeResult": {
+        "properties": {
+          "user": {
+            "$ref": "#/components/schemas/UserOut"
+          },
+          "character": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CharacterMeOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "user"
+        ],
+        "title": "DebugMeResult"
       },
       "EconomyStatus": {
         "properties": {
@@ -4478,6 +4704,71 @@
         ],
         "title": "FriendUser"
       },
+      "GraduationSummary": {
+        "properties": {
+          "user_id": {
+            "type": "integer",
+            "title": "User Id"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "graduated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Graduated At"
+          },
+          "play_days": {
+            "type": "integer",
+            "title": "Play Days"
+          },
+          "feed_count": {
+            "type": "integer",
+            "title": "Feed Count"
+          },
+          "quiz_attempt_count": {
+            "type": "integer",
+            "title": "Quiz Attempt Count"
+          },
+          "quiz_correct_count": {
+            "type": "integer",
+            "title": "Quiz Correct Count"
+          },
+          "minigame_best_scores": {
+            "items": {
+              "$ref": "#/components/schemas/MiniGameBestScore"
+            },
+            "type": "array",
+            "title": "Minigame Best Scores"
+          }
+        },
+        "type": "object",
+        "required": [
+          "user_id",
+          "play_days",
+          "feed_count",
+          "quiz_attempt_count",
+          "quiz_correct_count",
+          "minigame_best_scores"
+        ],
+        "title": "GraduationSummary"
+      },
       "GuestbookCreate": {
         "properties": {
           "content": {
@@ -4582,6 +4873,41 @@
         },
         "type": "object",
         "title": "HTTPValidationError"
+      },
+      "MiniGameBestScore": {
+        "properties": {
+          "game_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Game Type"
+          },
+          "mode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mode"
+          },
+          "best_score": {
+            "type": "integer",
+            "title": "Best Score"
+          }
+        },
+        "type": "object",
+        "required": [
+          "best_score"
+        ],
+        "title": "MiniGameBestScore"
       },
       "MiniGamePlayResult": {
         "properties": {
@@ -4995,6 +5321,18 @@
           "score": {
             "type": "integer",
             "title": "Score"
+          },
+          "success": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Success",
+            "default": true
           }
         },
         "type": "object",
@@ -5338,6 +5676,10 @@
             "type": "string",
             "title": "Question"
           },
+          "answer": {
+            "type": "string",
+            "title": "Answer"
+          },
           "options": {
             "anyOf": [
               {
@@ -5367,6 +5709,7 @@
         "required": [
           "quiz_id",
           "question",
+          "answer",
           "quiz_point"
         ],
         "title": "QuizQuestion"
@@ -5571,6 +5914,11 @@
               }
             ],
             "title": "State"
+          },
+          "equipped_skin_key": {
+            "type": "string",
+            "title": "Equipped Skin Key",
+            "default": "default"
           }
         },
         "type": "object",
@@ -5764,7 +6112,7 @@
             "title": "Detail"
           },
           "item": {
-            "$ref": "#/components/schemas/RoomItemOut"
+            "$ref": "#/components/schemas/ShopItemOut"
           },
           "coin": {
             "type": "integer",
@@ -5910,14 +6258,35 @@
             ],
             "title": "Type"
           },
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
           "school_food_id": {
             "type": "integer",
             "title": "School Food Id"
+          },
+          "image": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image"
+          },
+          "price": {
+            "type": "integer",
+            "title": "Price",
+            "default": 4
           }
         },
         "type": "object",
         "required": [
           "name",
+          "id",
           "school_food_id"
         ],
         "title": "SchoolFood"
@@ -6662,6 +7031,18 @@
               }
             ],
             "title": "Created At"
+          },
+          "graduated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Graduated At"
           }
         },
         "type": "object",

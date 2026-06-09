@@ -16,8 +16,11 @@ import {
 import { colors } from "@/constants/colors";
 import { fonts } from "@/constants/fonts";
 import { useGameStore } from "@/stores/useGameStore";
-import { updateMyCharacter } from "@/utils/serverApi";
-import { getXpProgressInfo } from "@/utils/xpProgress";
+import {
+  getServerApiErrorMessage,
+  patchMyDebugState,
+} from "@/utils/serverApi";
+import { getTotalXpForGrade, getXpProgressInfo } from "@/utils/xpProgress";
 import React, { useEffect, useMemo, useState } from "react";
 import {
   Pressable,
@@ -178,6 +181,7 @@ const DeveloperPanel = ({
     (state) => state.setHasSeenMiniGameTutorial,
   );
   const setMealDayMode = useGameStore((state) => state.setMealDayMode);
+  const setGameState = useGameStore((state) => state.setGameState);
   const setStudentId = useGameStore((state) => state.setStudentId);
   const setTotalXp = useGameStore((state) => state.setTotalXp);
   const setUserName = useGameStore((state) => state.setUserName);
@@ -241,11 +245,85 @@ const DeveloperPanel = ({
     showFeedback("부 상태 동기화 중", stateLabel);
 
     try {
-      await updateMyCharacter({ state: nextCharacterState }, accessToken);
+      const result = await patchMyDebugState(
+        { character_state: nextCharacterState },
+        accessToken,
+      );
+
+      setGameState(
+        {
+          characterState:
+            result.character?.state &&
+            CHARACTER_STATE_OPTIONS.includes(
+              result.character.state as CharacterState,
+            )
+              ? (result.character.state as CharacterState)
+              : nextCharacterState,
+          coin: result.user.coin,
+          totalXp: result.user.xp_point,
+        },
+        { resolveAchievements: false },
+      );
       showFeedback("부 상태를 변경했어요", `${stateLabel} / 서버 반영 완료`);
     } catch (error) {
       console.warn("개발자 패널 서버 부 상태 동기화 실패", error);
       showFeedback("서버 상태 동기화 실패", "로컬 상태만 변경됐어요");
+    }
+  };
+
+  const applyDebugStatePatch = async ({
+    localApply,
+    patch,
+    successMessage,
+    successTitle,
+  }: {
+    localApply: () => void;
+    patch: {
+      character_state?: string | null;
+      coin?: number | null;
+      stage?: number | null;
+      xp_point?: number | null;
+    };
+    successMessage?: string;
+    successTitle: string;
+  }) => {
+    localApply();
+
+    if (!accessToken) {
+      showFeedback(successTitle, successMessage);
+      return;
+    }
+
+    showFeedback("개발자 상태 동기화 중", successMessage);
+
+    try {
+      const result = await patchMyDebugState(patch, accessToken);
+      const serverCharacterState =
+        result.character?.state &&
+        CHARACTER_STATE_OPTIONS.includes(result.character.state as CharacterState)
+          ? (result.character.state as CharacterState)
+          : undefined;
+
+      setGameState(
+        {
+          coin: result.user.coin,
+          ...(serverCharacterState
+            ? { characterState: serverCharacterState }
+            : {}),
+          totalXp: result.user.xp_point,
+        },
+        { resolveAchievements: false },
+      );
+      showFeedback(
+        successTitle,
+        successMessage ? `${successMessage} / 서버 반영 완료` : "서버 반영 완료",
+      );
+    } catch (error) {
+      console.warn("개발자 패널 서버 상태 동기화 실패", error);
+      showFeedback(
+        "서버 상태 동기화 실패",
+        getServerApiErrorMessage(error, "로컬 상태만 변경됐어요"),
+      );
     }
   };
 
@@ -343,8 +421,15 @@ const DeveloperPanel = ({
                   key={`coin-${delta}`}
                   label={`${delta > 0 ? "+" : ""}${delta}`}
                   onPress={() => {
-                    adjustCoin(delta);
-                    showFeedback("코인을 변경했어요", `${delta > 0 ? "+" : ""}${delta}`);
+                    const currentCoin = useGameStore.getState().coin;
+                    const nextCoin = Math.max(currentCoin + delta, 0);
+
+                    void applyDebugStatePatch({
+                      localApply: () => adjustCoin(delta),
+                      patch: { coin: nextCoin },
+                      successMessage: `${delta > 0 ? "+" : ""}${delta}`,
+                      successTitle: "코인을 변경했어요",
+                    });
                   }}
                 />
               ))}
@@ -361,18 +446,30 @@ const DeveloperPanel = ({
                   key={`xp-${delta}`}
                   label={`${delta > 0 ? "+" : ""}${delta}`}
                   onPress={() => {
-                    adjustXp(delta);
-                    showFeedback("XP를 변경했어요", `${delta > 0 ? "+" : ""}${delta} XP`);
+                    const currentTotalXp = useGameStore.getState().totalXp;
+                    const nextTotalXp = Math.max(currentTotalXp + delta, 0);
+
+                    void applyDebugStatePatch({
+                      localApply: () => adjustXp(delta),
+                      patch: { xp_point: nextTotalXp },
+                      successMessage: `${delta > 0 ? "+" : ""}${delta} XP`,
+                      successTitle: "XP를 변경했어요",
+                    });
                   }}
                 />
               ))}
               <DeveloperChipButton
                 label="가득"
                 onPress={() => {
-                  adjustXp(
-                    xpProgress.progressMaxXp - xpProgress.currentXpInGrade,
-                  );
-                  showFeedback("현재 학년 XP를 가득 채웠어요");
+                  const delta =
+                    xpProgress.progressMaxXp - xpProgress.currentXpInGrade;
+                  const nextTotalXp = Math.max(totalXp + delta, 0);
+
+                  void applyDebugStatePatch({
+                    localApply: () => adjustXp(delta),
+                    patch: { xp_point: nextTotalXp },
+                    successTitle: "현재 학년 XP를 가득 채웠어요",
+                  });
                 }}
               />
             </View>
@@ -473,8 +570,17 @@ const DeveloperPanel = ({
                   label={`${gradeOption}학년`}
                   active={xpProgress.grade === gradeOption}
                   onPress={() => {
-                    setGrade(gradeOption);
-                    showFeedback("학년을 변경했어요", `${gradeOption}학년`);
+                    const nextTotalXp = getTotalXpForGrade(gradeOption);
+
+                    void applyDebugStatePatch({
+                      localApply: () => setGrade(gradeOption),
+                      patch: {
+                        stage: gradeOption,
+                        xp_point: nextTotalXp,
+                      },
+                      successMessage: `${gradeOption}학년`,
+                      successTitle: "학년을 변경했어요",
+                    });
                   }}
                 />
               ))}
@@ -482,8 +588,14 @@ const DeveloperPanel = ({
                 label="졸업 직전"
                 active={totalXp === 8999}
                 onPress={() => {
-                  setTotalXp(8999);
-                  showFeedback("졸업 직전 XP로 이동했어요");
+                  void applyDebugStatePatch({
+                    localApply: () => setTotalXp(8999),
+                    patch: {
+                      stage: 4,
+                      xp_point: 8999,
+                    },
+                    successTitle: "졸업 직전 XP로 이동했어요",
+                  });
                 }}
               />
               <DeveloperChipButton

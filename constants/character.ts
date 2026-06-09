@@ -108,6 +108,11 @@ export const CHARACTER_COSTUMES = [
   },
 ] as const satisfies readonly CharacterCostumeDefinition[];
 
+export const isCharacterCostumeKey = (
+  value: string | null | undefined,
+): value is CharacterCostumeKey =>
+  CHARACTER_COSTUMES.some((costume) => costume.key === value);
+
 const CHARACTER_COSTUME_IMAGE_OVERRIDES: Partial<
   Record<CharacterCostumeKey, Partial<Record<CharacterGrade, GradeCharacterImages>>>
 > = {

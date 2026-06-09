@@ -10,6 +10,7 @@ import type { CharacterGrade } from "@/constants/character";
 import { CHARACTER_IMAGES } from "@/constants/character";
 import { colors } from "@/constants/colors";
 import { fonts } from "@/constants/fonts";
+import type { GraduationSummary } from "@/utils/serverApi";
 import { Image } from "expo-image";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -33,6 +34,7 @@ interface EvolutionOverlayProps {
 
 type GraduationOverlayProps = {
   achievementStats?: GraduationStatsSnapshot;
+  graduationSummary?: GraduationSummary | null;
   onExit: () => void;
   onRestart: () => void;
   userCreatedAt?: string | null;
@@ -112,10 +114,44 @@ const getGraduationStats = (
   ],
 ] as const;
 
+const getServerMiniGameBestScores = (
+  graduationSummary?: GraduationSummary | null,
+): GraduationStatsSnapshot["miniGameBestScores"] | undefined => {
+  if (!graduationSummary) {
+    return undefined;
+  }
+
+  return graduationSummary.minigame_best_scores.reduce<
+    NonNullable<GraduationStatsSnapshot["miniGameBestScores"]>
+  >(
+    (scores, score) => {
+      if (score.game_type === "catchTheMajor") {
+        scores.catchTheMajor = score.best_score;
+      }
+
+      if (score.game_type === "catchBoo") {
+        scores.catchBoo = score.best_score;
+      }
+
+      if (score.game_type === "freeThrow") {
+        scores.freeThrow = score.best_score;
+      }
+
+      return scores;
+    },
+    {
+      catchBoo: 0,
+      catchTheMajor: 0,
+      freeThrow: 0,
+    },
+  );
+};
+
 const JOBKOREA_URL = "https://www.jobkorea.co.kr/";
 
 export function GraduationOverlay({
   achievementStats,
+  graduationSummary,
   onExit,
   onRestart,
   userCreatedAt,
@@ -184,12 +220,25 @@ export function GraduationOverlay({
 
   const currentStep = GRADUATION_STEPS[stepIndex];
   const playDayCount = useMemo(
-    () => getPlayDayCount(userCreatedAt),
-    [userCreatedAt],
+    () =>
+      graduationSummary?.play_days ??
+      getPlayDayCount(graduationSummary?.created_at ?? userCreatedAt),
+    [graduationSummary?.created_at, graduationSummary?.play_days, userCreatedAt],
+  );
+  const displayedAchievementStats = useMemo(
+    () =>
+      graduationSummary
+        ? {
+            feedCount: graduationSummary.feed_count,
+            miniGameBestScores: getServerMiniGameBestScores(graduationSummary),
+            quizCorrectCount: graduationSummary.quiz_correct_count,
+          }
+        : achievementStats,
+    [achievementStats, graduationSummary],
   );
   const graduationStats = useMemo(
-    () => getGraduationStats(playDayCount, achievementStats),
-    [achievementStats, playDayCount],
+    () => getGraduationStats(playDayCount, displayedAchievementStats),
+    [displayedAchievementStats, playDayCount],
   );
   const canGoBack = stepIndex > 0;
   const canGoNext = stepIndex < GRADUATION_STEPS.length - 1;

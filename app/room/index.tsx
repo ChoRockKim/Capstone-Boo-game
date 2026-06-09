@@ -26,6 +26,7 @@ import TopAlert from "@/components/TopAlert/TopAlert";
 import {
   CHARACTER_COSTUMES,
   getCharacterImage,
+  isCharacterCostumeKey,
   type CharacterCostumeKey,
 } from "@/constants/character";
 import { colors } from "@/constants/colors";
@@ -44,6 +45,7 @@ import {
   listShopItems,
   purchaseShopItem,
   ShopItemOut,
+  updateMyCharacter,
   updateRoomGuestbook,
 } from "@/utils/serverApi";
 import { RoomGuestbookListEntry } from "@/components/Room/RoomGuestbookDummyData";
@@ -783,7 +785,7 @@ export default function RoomIndex() {
     setSelectedClosetCostumeKey(costumeKey);
   };
 
-  const confirmClosetCostume = () => {
+  const confirmClosetCostume = async () => {
     const selectedCostume = closetCostumeOptions.find(
       (costume) => costume.key === selectedClosetCostumeKey,
     );
@@ -797,9 +799,47 @@ export default function RoomIndex() {
     }
 
     playSoundEffect("basicClick");
+    const previousCostumeKey = characterCostumeKey;
     setCharacterCostumeKey(selectedClosetCostumeKey);
+
+    if (accessToken) {
+      showTopAlert(
+        "코스튬 변경 중",
+        `${selectedCostume.label} 코스튬을 저장하고 있어요.`,
+      );
+
+      try {
+        const updatedCharacter = await updateMyCharacter(
+          { equipped_skin_key: selectedClosetCostumeKey },
+          accessToken,
+        );
+        const serverCostumeKey = isCharacterCostumeKey(
+          updatedCharacter.equipped_skin_key,
+        )
+          ? updatedCharacter.equipped_skin_key
+          : selectedClosetCostumeKey;
+
+        setCharacterCostumeKey(serverCostumeKey);
+        showTopAlert(
+          "코스튬 변경 완료",
+          `${selectedCostume.label} 코스튬을 적용했어요.`,
+        );
+      } catch (error) {
+        setCharacterCostumeKey(previousCostumeKey);
+        showTopAlert(
+          "코스튬 저장 실패",
+          getServerApiErrorMessage(error, "코스튬을 저장하지 못했어요."),
+        );
+        return;
+      }
+    } else {
+      showTopAlert(
+        "코스튬 변경 완료",
+        `${selectedCostume.label} 코스튬을 적용했어요.`,
+      );
+    }
+
     setIsClosetOpen(false);
-    showTopAlert("코스튬 변경 완료", `${selectedCostume.label} 코스튬을 적용했어요.`);
   };
 
   const confirmPurchase = async () => {

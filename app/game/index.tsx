@@ -95,7 +95,9 @@ import {
   type PreloadableImageAsset,
 } from "@/utils/preloadImageAssets";
 import {
+  confirmGraduation,
   confirmMyCharacterEvolution,
+  type GraduationSummary,
   getQuizPlayStatus,
   getSchoolFoodFeedStatus,
 } from "@/utils/serverApi";
@@ -268,6 +270,8 @@ export default function Index() {
   const [isDeveloperPanelOpen, setIsDeveloperPanelOpen] = useState(false);
   const [isGraduationOpen, setIsGraduationOpen] = useState(false);
   const [isGraduationPreview, setIsGraduationPreview] = useState(false);
+  const [graduationSummary, setGraduationSummary] =
+    useState<GraduationSummary | null>(null);
   const [isMiniGameLoading, setIsMiniGameLoading] = useState(false);
   const [isBackgroundReady, setIsBackgroundReady] = useState(
     hasPreloadedGameCriticalImageAssets,
@@ -1094,6 +1098,7 @@ export default function Index() {
       setEvolutionPhase(null);
       setCharacterState("happy1");
       setIsGraduationPreview(!!options?.preview);
+      setGraduationSummary(null);
       setIsGraduationOpen(true);
 
       if (options?.preview) {
@@ -1105,9 +1110,13 @@ export default function Index() {
       const currentAccessToken = useGameStore.getState().accessToken;
 
       if (currentAccessToken) {
-        void confirmMyCharacterEvolution(currentAccessToken).catch((error) => {
-          console.warn("서버 캐릭터 졸업 확정 실패", error);
-        });
+        void confirmGraduation(currentAccessToken)
+          .then((summary) => {
+            setGraduationSummary(summary);
+          })
+          .catch((error) => {
+            console.warn("서버 졸업 확정 실패", error);
+          });
       }
     },
     [
@@ -1122,6 +1131,7 @@ export default function Index() {
   const closeGraduationOverlay = useCallback(() => {
     setIsGraduationOpen(false);
     setIsGraduationPreview(false);
+    setGraduationSummary(null);
     graduationMusicCleanupRef.current?.();
     graduationMusicCleanupRef.current = null;
   }, []);
@@ -1740,6 +1750,7 @@ export default function Index() {
       )}
       <GraduationOverlay
         achievementStats={achievementStats}
+        graduationSummary={graduationSummary}
         onExit={handleGraduationExit}
         onRestart={handleGraduationRestart}
         userCreatedAt={userCreatedAt}

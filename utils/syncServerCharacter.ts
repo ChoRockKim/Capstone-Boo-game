@@ -4,7 +4,10 @@
  * @used-by      utils/syncServerUserStats.ts
  * @side-effects HTTP 요청, Zustand 상태 변경
  */
-import type { CharacterState } from "@/constants/character";
+import {
+  isCharacterCostumeKey,
+  type CharacterState,
+} from "@/constants/character";
 import { useGameStore } from "@/stores/useGameStore";
 import {
   BooCharacter,
@@ -65,15 +68,36 @@ const normalizeServerCharacterState = (state: string | null | undefined) =>
     ? (state as CharacterState)
     : null;
 
+const normalizeServerCharacterCostumeKey = (
+  value: string | null | undefined,
+) => (isCharacterCostumeKey(value) ? value : null);
+
 const syncMyCharacterToLocalState = (myCharacter: CharacterMeOut) => {
   const normalizedName = normalizeCharacterName(myCharacter.character_name);
   const normalizedState = normalizeServerCharacterState(myCharacter.state);
+  const normalizedCostumeKey = normalizeServerCharacterCostumeKey(
+    myCharacter.equipped_skin_key,
+  );
   const currentState = useGameStore.getState();
 
   currentState.setGameState(
     {
       booName: normalizedName,
       serverCharacterId: myCharacter.character_id,
+      ...(normalizedCostumeKey
+        ? {
+            characterCostumeKey: normalizedCostumeKey,
+            ownedAchievementSkins:
+              normalizedCostumeKey === "default"
+                ? currentState.ownedAchievementSkins
+                : [
+                    ...new Set([
+                      ...currentState.ownedAchievementSkins,
+                      normalizedCostumeKey,
+                    ]),
+                  ],
+          }
+        : {}),
       ...(normalizedState && currentState.characterState !== "hungry"
         ? { characterState: normalizedState }
         : {}),

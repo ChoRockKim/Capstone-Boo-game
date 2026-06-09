@@ -699,6 +699,7 @@ const CatchBooPlayScreen = () => {
           mode: "normal",
           play_session_id: playSessionIdRef.current,
           score: finalScore,
+          success: true,
         },
         accessToken,
       );

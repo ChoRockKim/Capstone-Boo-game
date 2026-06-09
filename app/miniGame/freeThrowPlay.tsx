@@ -765,6 +765,7 @@ export default function FreeThrowPlayScreen() {
           mode: "normal",
           play_session_id: playSessionIdRef.current,
           score: currentRound,
+          success: true,
         },
         accessToken,
       );
