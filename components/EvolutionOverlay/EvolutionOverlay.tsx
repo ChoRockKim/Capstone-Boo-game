@@ -49,6 +49,7 @@ type GraduationStatsSnapshot = {
     catchTheMajor?: number;
     freeThrow?: number;
   };
+  quizAttemptCount?: number;
   quizCorrectCount: number;
 };
 
@@ -96,23 +97,37 @@ const getPlayDayCount = (createdAt?: string | null) => {
 const getGraduationStats = (
   playDayCount: number,
   achievementStats?: GraduationStatsSnapshot,
-) => [
-  ["졸업까지 걸린 날:", `${playDayCount}일`],
-  ["먹은 학식", `${achievementStats?.feedCount ?? 0}끼`],
-  ["맞춘퀴즈 수:", `${achievementStats?.quizCorrectCount ?? 0}개`],
-  [
+) => {
+  const stats = [
+    ["졸업까지 걸린 날:", `${playDayCount}일`],
+    ["먹은 학식", `${achievementStats?.feedCount ?? 0}끼`],
+  ];
+
+  if (achievementStats?.quizAttemptCount !== undefined) {
+    stats.push(["푼 퀴즈 수:", `${achievementStats.quizAttemptCount}개`]);
+  }
+
+  stats.push(
+    ["맞춘 퀴즈 수:", `${achievementStats?.quizCorrectCount ?? 0}개`],
+    [
     "전공책 받기 최고 점수:",
     `${achievementStats?.miniGameBestScores?.catchTheMajor ?? 0}P`,
-  ],
-  [
+    ],
+    [
     "부 잡기 최고 점수:",
     `${achievementStats?.miniGameBestScores?.catchBoo ?? 0}P`,
-  ],
-  [
+    ],
+    [
     "자유투 넣기 최고 점수:",
     `${achievementStats?.miniGameBestScores?.freeThrow ?? 0}P`,
-  ],
-] as const;
+    ],
+  );
+
+  return stats;
+};
+
+const normalizeMiniGameType = (gameType?: string | null) =>
+  gameType?.toLowerCase().replace(/[^a-z0-9]/g, "") ?? "";
 
 const getServerMiniGameBestScores = (
   graduationSummary?: GraduationSummary | null,
@@ -125,15 +140,24 @@ const getServerMiniGameBestScores = (
     NonNullable<GraduationStatsSnapshot["miniGameBestScores"]>
   >(
     (scores, score) => {
-      if (score.game_type === "catchTheMajor") {
+      const normalizedGameType = normalizeMiniGameType(score.game_type);
+
+      if (
+        normalizedGameType === "catchthemajor" ||
+        normalizedGameType === "bookcatch" ||
+        normalizedGameType === "catchmajor"
+      ) {
         scores.catchTheMajor = score.best_score;
       }
 
-      if (score.game_type === "catchBoo") {
+      if (normalizedGameType === "catchboo") {
         scores.catchBoo = score.best_score;
       }
 
-      if (score.game_type === "freeThrow") {
+      if (
+        normalizedGameType === "freethrow" ||
+        normalizedGameType === "basketball"
+      ) {
         scores.freeThrow = score.best_score;
       }
 
@@ -145,6 +169,40 @@ const getServerMiniGameBestScores = (
       freeThrow: 0,
     },
   );
+};
+
+const mergeGraduationStats = (
+  localStats?: GraduationStatsSnapshot,
+  serverSummary?: GraduationSummary | null,
+): GraduationStatsSnapshot | undefined => {
+  if (!serverSummary) {
+    return localStats;
+  }
+
+  const serverBestScores = getServerMiniGameBestScores(serverSummary);
+
+  return {
+    feedCount: Math.max(localStats?.feedCount ?? 0, serverSummary.feed_count),
+    miniGameBestScores: {
+      catchBoo: Math.max(
+        localStats?.miniGameBestScores?.catchBoo ?? 0,
+        serverBestScores?.catchBoo ?? 0,
+      ),
+      catchTheMajor: Math.max(
+        localStats?.miniGameBestScores?.catchTheMajor ?? 0,
+        serverBestScores?.catchTheMajor ?? 0,
+      ),
+      freeThrow: Math.max(
+        localStats?.miniGameBestScores?.freeThrow ?? 0,
+        serverBestScores?.freeThrow ?? 0,
+      ),
+    },
+    quizAttemptCount: serverSummary.quiz_attempt_count,
+    quizCorrectCount: Math.max(
+      localStats?.quizCorrectCount ?? 0,
+      serverSummary.quiz_correct_count,
+    ),
+  };
 };
 
 const JOBKOREA_URL = "https://www.jobkorea.co.kr/";
@@ -226,14 +284,7 @@ export function GraduationOverlay({
     [graduationSummary?.created_at, graduationSummary?.play_days, userCreatedAt],
   );
   const displayedAchievementStats = useMemo(
-    () =>
-      graduationSummary
-        ? {
-            feedCount: graduationSummary.feed_count,
-            miniGameBestScores: getServerMiniGameBestScores(graduationSummary),
-            quizCorrectCount: graduationSummary.quiz_correct_count,
-          }
-        : achievementStats,
+    () => mergeGraduationStats(achievementStats, graduationSummary),
     [achievementStats, graduationSummary],
   );
   const graduationStats = useMemo(
